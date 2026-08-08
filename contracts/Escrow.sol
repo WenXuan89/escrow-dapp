@@ -223,10 +223,15 @@ contract Escrow {
         onlyShipperOf(agreementId)
         inStatus(agreementId, AgreementStatus.Created)
     {
-        // TODO(Person B):
-        // - require msg.value == agreements[agreementId].totalValue
-        // - update fundedAmount, set status = Funded
-        // - emit AgreementFunded
+        Agreement storage agreement = agreements[agreementId];
+        
+        require(msg.value == agreement.totalValue, "Sent value must match totalValue");
+        
+        agreement.fundedAmount = msg.value;
+        agreement.status = AgreementStatus.Funded;
+        
+        emit AgreementFunded(agreementId, msg.value);
+
     }
 
     /// @notice Shipper verifies a milestone the Carrier has reported.
@@ -235,7 +240,7 @@ contract Escrow {
     function verifyMilestone(uint256 agreementId, uint256 milestoneIndex)
         public
         onlyShipperOf(agreementId)
-    {
+    //{
         // TODO(Person B):
         // - require agreement status is Funded or InProgress
         // - require milestones[milestoneIndex].reported == true
@@ -253,6 +258,46 @@ contract Escrow {
         //        could just be a flat amount per completed agreement instead of tied
         //        to totalValue, team's choice)
         // - emit MilestoneVerified
+
+
+    //}
+    {
+        Agreement storage agreement = agreements[agreementId];
+        
+        require(
+        agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
+        "Agreement not in a payable state"
+        );
+
+        Milestone storage milestone = agreement.milestones[milestoneIndex];
+        require(milestone.reported, "Milestone has not been reported yet");
+        require(!milestone.completed, "Milestone already verified");
+
+        uint256 payout = (agreement.totalValue * milestone.payoutPercentage) / 100;
+
+        milestone.completed = true;
+        milestone.completedTimestamp = block.timestamp;
+        agreement.releasedAmount += payout;
+
+        (bool sent, ) = payable(agreement.carrier).call{value: payout}("");
+        require(sent, "Payment to carrier failed");
+
+        bool allCompleted = true;
+        for (uint256 i = 0; i < agreement.milestones.length; i++) {
+            if (!agreement.milestones[i].completed) {
+                allCompleted = false;
+            break;
+            }
+        }
+
+        if (allCompleted) {
+            agreement.status = AgreementStatus.Completed;
+            reputationToken.mint(agreement.carrier, agreement.totalValue);
+        } else {
+            agreement.status = AgreementStatus.InProgress;
+        }
+
+        emit MilestoneVerified(agreementId, milestoneIndex, payout);
     }
 
 
