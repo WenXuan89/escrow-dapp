@@ -309,6 +309,7 @@ contract Escrow {
     //           Lab 6 Ex.3 Coin.sol (pattern for the reputation token)
     // =================================================================
 
+<<<<<<< HEAD
     address public arbitrator;
 
     modifier onlyArbitrator() {
@@ -316,10 +317,13 @@ contract Escrow {
         _;
     }
 
+=======
+>>>>>>> c56233ca36b00172efd8b50b0439a7375176d7e4
     /// @notice Anyone can call this after the deadline to trigger a
     /// refund of remaining escrowed funds back to the shipper if not
     /// all milestones were verified in time.
     function checkAndRefund(uint256 agreementId) public {
+<<<<<<< HEAD
         Agreement storage agreement = agreements[agreementId];
 
         require(block.timestamp > agreement.deadline, "Deadline has not passed yet");
@@ -389,3 +393,48 @@ contract Escrow {
         }
     }
 }
+=======
+        // TODO(Person C):
+        // - require block.timestamp > agreements[agreementId].deadline
+        // - require status is Funded or InProgress (not already
+        //   Completed/Refunded/Disputed)
+        // - calculate remaining = fundedAmount - releasedAmount
+        // - refund `remaining` back to shipper using call{value:} pattern
+        // - set status = Refunded
+        // - emit AgreementRefunded
+    }
+
+    /// @notice EITHER the shipper or the carrier can raise a dispute.
+    /// Typical triggers: shipper thinks a reported milestone is false,
+    /// OR carrier thinks a legitimately reported milestone is being
+    /// unfairly ignored / not verified.
+    function raiseDispute(uint256 agreementId) public onlyParticipant(agreementId) {
+        // TODO(Person C):
+        // - require status is Funded or InProgress (can't dispute an
+        //   already Completed/Refunded agreement)
+        // - set status = Disputed
+        // - emit DisputeRaised
+    }
+
+    /// @notice Resolution mechanism — decide as a team who is allowed
+    /// to call this (e.g. a fixed arbitrator address set at deployment,
+    /// or require both shipper and carrier to separately call/agree).
+    /// Keep it simple given the project timeline.
+    function resolveDispute(uint256 agreementId, bool refundShipper) public {
+        // TODO(Person C):
+        // - require status == Disputed
+        // - require caller is authorized to resolve (decide as a team)
+        // - if refundShipper, pay remaining funds back to shipper;
+        //   else, pay remaining funds to carrier and consider whether
+        //   to mint reputation for this agreement too
+        // - set status = Completed or Refunded accordingly
+        // - emit DisputeResolved
+    }
+
+    // OPTIONAL, only if time allows (discuss with Person C):
+    // function penalizeCarrier(address carrier, uint256 amount) — call
+    // reputationToken's burn/penalize function when a dispute resolves
+    // AGAINST the carrier. See the note in ReputationToken.sol.
+}
+
+>>>>>>> c56233ca36b00172efd8b50b0439a7375176d7e4
