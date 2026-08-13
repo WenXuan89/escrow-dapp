@@ -110,9 +110,16 @@ contract Escrow {
     }
 
     constructor(address reputationTokenAddress) {
-        reputationToken = ReputationToken(reputationTokenAddress);
-    }
+        require(
+            reputationTokenAddress != address(0),
+            "Invalid reputation token address"
+        );
 
+        reputationToken = ReputationToken(
+            reputationTokenAddress
+        );
+        arbitrator = msg.sender;   // whoever deploys the contract becomes the arbitrator
+    }
 
     // =================================================================
     // SECTION A — Registration, Agreement Creation & Milestone Reporting
@@ -209,150 +216,206 @@ contract Escrow {
 
 
     // =================================================================
-    // SECTION B — Funding & Shipper Verification / Payout
-    // Owner: Person B
-    // Refer to: Lab 6.2 (address, msg.value, msg.sender),
-    //           Lab 6.3 (send Ether — use the .call{value:} pattern),
-    //           Lab 5.4 (view/pure)
+    // Funding & Shipper Verification / Payout
     // =================================================================
-
-    /// @notice Shipper deposits Ether into escrow for a given agreement.
-    function fundAgreement(uint256 agreementId)
-        public
-        payable
-        onlyShipperOf(agreementId)
-        inStatus(agreementId, AgreementStatus.Created)
-    {
-        Agreement storage agreement = agreements[agreementId];
-        
-        require(msg.value == agreement.totalValue, "Sent value must match totalValue");
-        
-        agreement.fundedAmount = msg.value;
-        agreement.status = AgreementStatus.Funded;
-        
-        emit AgreementFunded(agreementId, msg.value);
-
-    }
-
-    /// @notice Shipper verifies a milestone the Carrier has reported.
-    /// THIS is what actually releases the payout — reportMilestone()
-    /// alone never moves funds.
-    function verifyMilestone(uint256 agreementId, uint256 milestoneIndex)
+   /**
+     * @notice Shipper verifies a milestone reported by the carrier.
+     *
+     * Verification triggers the payout.
+     */
+    function verifyMilestone(
+        uint256 agreementId,
+        uint256 milestoneIndex
+    )
         public
         onlyShipperOf(agreementId)
-    //{
-        // TODO(Person B):
-        // - require agreement status is Funded or InProgress
-        // - require milestones[milestoneIndex].reported == true
-        // - require milestones[milestoneIndex].completed == false
-        // - calculate payout = totalValue * payoutPercentage / 100
-        // - send payout to carrier using the call{value:} pattern (Lab 6.3):
-        //     (bool sent, ) = payable(agreements[agreementId].carrier).call{value: payout}("");
-        //     require(sent, "Payment failed");
-        // - update releasedAmount, set completed = true, completedTimestamp = block.timestamp
-        // - set status = InProgress (if not already all done)
-        // - if ALL milestones now completed:
-        //     - set status = Completed
-        //     - call reputationToken.mint(agreements[agreementId].carrier, totalValue)
-        //       (coordinate with Person C on what "amount" of reputation makes sense —
-        //        could just be a flat amount per completed agreement instead of tied
-        //        to totalValue, team's choice)
-        // - emit MilestoneVerified
-
-
-    //}
     {
-        Agreement storage agreement = agreements[agreementId];
-        
+        Agreement storage agreement =
+            agreements[agreementId];
+
         require(
-        agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
-        "Agreement not in a payable state"
+            agreement.status == AgreementStatus.Funded ||
+            agreement.status == AgreementStatus.InProgress,
+            "Agreement not in a payable state"
         );
 
-        Milestone storage milestone = agreement.milestones[milestoneIndex];
-        require(milestone.reported, "Milestone has not been reported yet");
-        require(!milestone.completed, "Milestone already verified");
+        require(
+            milestoneIndex < agreement.milestones.length,
+            "Invalid milestone index"
+        );
 
-        uint256 payout = (agreement.totalValue * milestone.payoutPercentage) / 100;
+        Milestone storage milestone =
+            agreement.milestones[milestoneIndex];
 
+        require(
+            milestone.reported,
+            "Milestone has not been reported yet"
+        );
+
+        require(
+            !milestone.completed,
+            "Milestone already verified"
+        );
+
+        uint256 payout =
+            (
+                agreement.totalValue *
+                milestone.payoutPercentage
+            ) / 100;
+
+        require(
+            payout > 0,
+            "Payout must be greater than zero"
+        );
+
+        require(
+            agreement.releasedAmount + payout <=
+            agreement.fundedAmount,
+            "Payout exceeds escrow balance"
+        );
+
+        /*
+         * Update the state before making the external payment.
+         */
         milestone.completed = true;
         milestone.completedTimestamp = block.timestamp;
+
         agreement.releasedAmount += payout;
 
-        (bool sent, ) = payable(agreement.carrier).call{value: payout}("");
-        require(sent, "Payment to carrier failed");
+        /*
+         * Pay the carrier.
+         */
+        (bool sent, ) =
+            payable(agreement.carrier).call{
+                value: payout
+            }("");
 
+        require(
+            sent,
+            "Payment to carrier failed"
+        );
+
+        /*
+         * Check whether all milestones have been completed.
+         */
         bool allCompleted = true;
-        for (uint256 i = 0; i < agreement.milestones.length; i++) {
+
+        for (
+            uint256 i = 0;
+            i < agreement.milestones.length;
+            i++
+        ) {
             if (!agreement.milestones[i].completed) {
                 allCompleted = false;
-            break;
+                break;
             }
         }
 
         if (allCompleted) {
-            agreement.status = AgreementStatus.Completed;
-            reputationToken.mint(agreement.carrier, agreement.totalValue);
+            agreement.status =
+                AgreementStatus.Completed;
+
+            /*
+             * Mint reputation only after all milestones
+             * have been successfully verified.
+             */
+            reputationToken.mint(
+                agreement.carrier,
+                agreement.totalValue
+            );
         } else {
-            agreement.status = AgreementStatus.InProgress;
+            agreement.status =
+                AgreementStatus.InProgress;
         }
 
-        emit MilestoneVerified(agreementId, milestoneIndex, payout);
+        emit MilestoneVerified(
+            agreementId,
+            milestoneIndex,
+            payout
+        );
     }
 
 
     // =================================================================
-    // SECTION C — Deadlines, Disputes, Refunds & Reputation Token
-    // Owner: Person C  (also owns ReputationToken.sol — see that file)
-    // Refer to: Lab 7.2 (block.timestamp / time units),
-    //           Lab 7.3 (function modifiers),
-    //           Lab 6 Ex.3 Coin.sol (pattern for the reputation token)
+    // Deadlines, Disputes, Refunds & Reputation Token
     // =================================================================
+
+    address public arbitrator;
+
+    modifier onlyArbitrator() {
+        require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
+        _;
+    }
 
     /// @notice Anyone can call this after the deadline to trigger a
     /// refund of remaining escrowed funds back to the shipper if not
     /// all milestones were verified in time.
     function checkAndRefund(uint256 agreementId) public {
-        // TODO(Person C):
-        // - require block.timestamp > agreements[agreementId].deadline
-        // - require status is Funded or InProgress (not already
-        //   Completed/Refunded/Disputed)
-        // - calculate remaining = fundedAmount - releasedAmount
-        // - refund `remaining` back to shipper using call{value:} pattern
-        // - set status = Refunded
-        // - emit AgreementRefunded
+
+        Agreement storage agreement = agreements[agreementId];
+
+        require(block.timestamp > agreement.deadline, "Deadline has not passed yet");
+        require(
+            agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
+            "Agreement is not in refundable status"
+        );
+
+        uint256 remaining = agreement.fundedAmount - agreement.releasedAmount;
+        require(remaining > 0, "No remaining funds to refund");
+
+        agreement.status = AgreementStatus.Refunded;
+
+        (bool sent, ) = payable(agreement.shipper).call{value: remaining}("");
+        require(sent, "Refund transfer to shipper failed");
+
+        emit AgreementRefunded(agreementId, remaining);
     }
 
     /// @notice EITHER the shipper or the carrier can raise a dispute.
-    /// Typical triggers: shipper thinks a reported milestone is false,
-    /// OR carrier thinks a legitimately reported milestone is being
-    /// unfairly ignored / not verified.
     function raiseDispute(uint256 agreementId) public onlyParticipant(agreementId) {
-        // TODO(Person C):
-        // - require status is Funded or InProgress (can't dispute an
-        //   already Completed/Refunded agreement)
-        // - set status = Disputed
-        // - emit DisputeRaised
+        Agreement storage agreement = agreements[agreementId];
+
+        require(
+            agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
+            "Cannot dispute an inactive or finalized agreement"
+        );
+
+        agreement.status = AgreementStatus.Disputed;
+
+        emit DisputeRaised(agreementId, msg.sender);
     }
 
-    /// @notice Resolution mechanism — decide as a team who is allowed
-    /// to call this (e.g. a fixed arbitrator address set at deployment,
-    /// or require both shipper and carrier to separately call/agree).
-    /// Keep it simple given the project timeline.
-    function resolveDispute(uint256 agreementId, bool refundShipper) public {
-        // TODO(Person C):
-        // - require status == Disputed
-        // - require caller is authorized to resolve (decide as a team)
-        // - if refundShipper, pay remaining funds back to shipper;
-        //   else, pay remaining funds to carrier and consider whether
-        //   to mint reputation for this agreement too
-        // - set status = Completed or Refunded accordingly
-        // - emit DisputeResolved
-    }
+    /// @notice Resolution mechanism — designated arbitrator decides
+    /// whether to refund shipper or release remaining funds to carrier.
+    function resolveDispute(uint256 agreementId, bool refundShipper)
+        public
+        onlyArbitrator
+    {
+        Agreement storage agreement = agreements[agreementId];
 
-    // OPTIONAL, only if time allows (discuss with Person C):
-    // function penalizeCarrier(address carrier, uint256 amount) — call
-    // reputationToken's burn/penalize function when a dispute resolves
-    // AGAINST the carrier. See the note in ReputationToken.sol.
+        require(agreement.status == AgreementStatus.Disputed, "Agreement is not in Disputed status");
+
+        uint256 remaining = agreement.fundedAmount - agreement.releasedAmount;
+
+        if (refundShipper) {
+            agreement.status = AgreementStatus.Refunded;
+            if (remaining > 0) {
+                (bool sent, ) = payable(agreement.shipper).call{value: remaining}("");
+                require(sent, "Refund to shipper failed");
+            }
+            emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds refunded to shipper");
+        } else {
+            agreement.status = AgreementStatus.Completed;
+            if (remaining > 0) {
+                agreement.releasedAmount += remaining;
+                (bool sent, ) = payable(agreement.carrier).call{value: remaining}("");
+                require(sent, "Payout to carrier failed");
+            }
+
+            // Mint reputation tokens upon successful resolution in carrier's favor
+            reputationToken.mint(agreement.carrier, agreement.totalValue);
+
+            emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds paid to carrier");
+        }
+    }
 }
-
