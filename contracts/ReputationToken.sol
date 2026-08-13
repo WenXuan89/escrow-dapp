@@ -26,12 +26,12 @@ contract ReputationToken {
         );
         _;
     }
-
-    constructor() {
+constructor() {
         owner = msg.sender;
         minter = msg.sender;
     }
-    
+
+    /// @notice Sets the Escrow contract as the authorized minter post-deployment.
     function setMinter(address newMinter) public onlyOwner {
         require(newMinter != address(0), "Invalid minter address");
 
@@ -41,21 +41,14 @@ contract ReputationToken {
         emit MinterChanged(oldMinter, newMinter);
     }
 
-    function mint(address to, uint256 amount)
-        public
-        onlyMinter
-    {
+    /// @notice Called by Escrow.verifyMilestone() to award reputation points.
+    function mint(address to, uint256 amount) public onlyMinter {
         balances[to] += amount;
-
         emit Mint(to, amount);
     }
 
     /// @notice Return a carrier's reputation balance.
-    function balanceOf(address account)
-        public
-        view
-        returns (uint256)
-    {
+    function balanceOf(address account) public view returns (uint256) {
         return balances[account];
     }
 }

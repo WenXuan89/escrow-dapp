@@ -1,0 +1,28 @@
+{
+  "name": "escrow-dapp-main",
+  "version": "1.0.0",
+  "description": "A decentralized application (dApp) built on Ethereum using Solidity, Truffle, and Ganache, allowing Shippers and Carriers to create, fund, and execute milestone-based logistics agreements with on-chain escrow, verification, refunds, disputes, and a reputation reward token.",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "dev": "lite-server",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WenXuan89/escrow-dapp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/WenXuan89/escrow-dapp/issues"
+  },
+  "homepage": "https://github.com/WenXuan89/escrow-dapp#readme",
+  "devDependencies": {
+    "lite-server": "^2.6.1"
+  }
+}

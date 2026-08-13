@@ -340,7 +340,7 @@ contract Escrow {
     // Deadlines, Disputes, Refunds & Reputation Token
     // =================================================================
 
-    address public arbitrator;
+address public arbitrator;
 
     modifier onlyArbitrator() {
         require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
@@ -351,7 +351,6 @@ contract Escrow {
     /// refund of remaining escrowed funds back to the shipper if not
     /// all milestones were verified in time.
     function checkAndRefund(uint256 agreementId) public {
-
         Agreement storage agreement = agreements[agreementId];
 
         require(block.timestamp > agreement.deadline, "Deadline has not passed yet");
@@ -412,7 +411,6 @@ contract Escrow {
                 require(sent, "Payout to carrier failed");
             }
 
-            // Mint reputation tokens upon successful resolution in carrier's favor
             reputationToken.mint(agreement.carrier, agreement.totalValue);
 
             emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds paid to carrier");
