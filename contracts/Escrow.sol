@@ -124,27 +124,25 @@ contract Escrow {
     // =================================================================
     // SECTION A — Registration, Agreement Creation & Milestone Reporting
     // Owner: Person A
-    // Refer to: Lab 3 (contract structure), Lab 5 (visibility, basic
-    //           types), Lab 6 Ex.1/Ex.2 (struct + mapping), Lab 7.1
-    //           (enum), Lab 7.2 (block.timestamp — for reportedTimestamp)
     // =================================================================
 
     /// @notice Register the caller as a Shipper or Carrier.
     function registerUser(Role role) public {
-        // TODO(Person A): set userRole[msg.sender], require not already
-        // registered (or allow re-registering only if role == None).
-        // IMPORTANT: if role == Role.Carrier, also push msg.sender into
-        // carrierList — this is what lets the frontend show a clickable
-        // list of carriers instead of the shipper typing an address.
-        // emit UserRegistered
+        require(role == Role.Shipper || role == Role.Carrier, "Invalid role");
+        require(userRole[msg.sender] == Role.None, "Already registered");
+
+        userRole[msg.sender] = role;
+
+        if (role == Role.Carrier) {
+            carrierList.push(msg.sender);
+        }
+
+        emit UserRegistered(msg.sender, role);
     }
 
     /// @notice Returns every address currently registered as a Carrier.
-    /// Frontend calls this to render a clickable list for the Shipper
-    /// to choose from when creating an agreement, instead of the
-    /// Shipper having to type an address manually.
     function getAllCarriers() public view returns (address[] memory) {
-        // TODO(Person A): return carrierList
+        return carrierList;
     }
 
     /// @notice Shipper creates a new logistics agreement with a carrier.
@@ -155,33 +153,71 @@ contract Escrow {
         string[] memory milestoneDescriptions,
         uint256[] memory milestonePercentages
     ) public onlyRegistered {
-        // TODO(Person A):
-        // - require caller's role == Shipper, carrier's role == Carrier
-        // - require milestoneDescriptions.length == milestonePercentages.length
-        // - require percentages sum to 100
-        // - require deadline > block.timestamp
-        //   NOTE for demo purposes: your frontend can let deadline be
-        //   set just minutes in the future (e.g. block.timestamp + 300)
-        //   so you can demo a missed-deadline refund live in ~20 mins.
-        // - push a new Agreement into `agreements`, increment agreementCount
-        //   (each Milestone starts with reported = false, completed = false)
-        // - emit AgreementCreated
+        require(userRole[msg.sender] == Role.Shipper, "Only a Shipper can create an agreement");
+        require(userRole[carrier] == Role.Carrier, "Selected address is not a registered Carrier");
+        require(deadline > block.timestamp, "Deadline must be in the future");
+        require(totalValue > 0, "Total value must be greater than zero");
+        require(
+            milestoneDescriptions.length == milestonePercentages.length,
+            "Milestone array length mismatch"
+        );
+        require(milestoneDescriptions.length > 0, "At least one milestone required");
+
+        uint256 sum = 0;
+        for (uint256 i = 0; i < milestonePercentages.length; i++) {
+            sum += milestonePercentages[i];
+        }
+        require(sum == 100, "Milestone payout percentages must sum to 100");
+
+        uint256 newId = agreementCount;
+        Agreement storage a = agreements[newId];
+        a.id = newId;
+        a.shipper = msg.sender;
+        a.carrier = carrier;
+        a.totalValue = totalValue;
+        a.deadline = deadline;
+        a.status = AgreementStatus.Created;
+        // fundedAmount and releasedAmount default to 0 automatically
+
+        for (uint256 i = 0; i < milestoneDescriptions.length; i++) {
+            a.milestones.push(Milestone({
+                description: milestoneDescriptions[i],
+                payoutPercentage: milestonePercentages[i],
+                reported: false,
+                completed: false,
+                reportedTimestamp: 0,
+                completedTimestamp: 0
+            }));
+        }
+
+        agreementCount++;
+
+        emit AgreementCreated(newId, msg.sender, carrier, totalValue, deadline);
     }
 
     /// @notice Carrier reports that a milestone has been physically
-    /// completed. This does NOT release any funds yet — it just flags
-    /// the milestone as "awaiting shipper verification."
+    /// completed. This does NOT release any funds yet.
     function reportMilestone(uint256 agreementId, uint256 milestoneIndex)
         public
         onlyCarrierOf(agreementId)
         beforeDeadline(agreementId)
     {
-        // TODO(Person A):
-        // - require agreement status is Funded or InProgress
-        // - require milestone not already reported and not already completed
-        // - set milestones[milestoneIndex].reported = true
-        // - set reportedTimestamp = block.timestamp
-        // - emit MilestoneReported
+        Agreement storage a = agreements[agreementId];
+
+        require(
+            a.status == AgreementStatus.Funded || a.status == AgreementStatus.InProgress,
+            "Agreement is not funded/active"
+        );
+        require(milestoneIndex < a.milestones.length, "Invalid milestone index");
+
+        Milestone storage m = a.milestones[milestoneIndex];
+        require(!m.reported, "Milestone already reported");
+        require(!m.completed, "Milestone already completed");
+
+        m.reported = true;
+        m.reportedTimestamp = block.timestamp;
+
+        emit MilestoneReported(agreementId, milestoneIndex, block.timestamp);
     }
 
     /// @notice Read a single agreement's core details (for frontend display)
@@ -194,7 +230,9 @@ contract Escrow {
         uint256 deadline,
         AgreementStatus status
     ) {
-        // TODO(Person A): return the fields from agreements[agreementId]
+        require(agreementId < agreementCount, "Agreement does not exist");
+        Agreement storage a = agreements[agreementId];
+        return (a.shipper, a.carrier, a.totalValue, a.fundedAmount, a.releasedAmount, a.deadline, a.status);
     }
 
     /// @notice Read a single milestone's details (for frontend display)
@@ -206,12 +244,16 @@ contract Escrow {
         uint256 reportedTimestamp,
         uint256 completedTimestamp
     ) {
-        // TODO(Person A): return the fields from
-        // agreements[agreementId].milestones[milestoneIndex]
+        require(agreementId < agreementCount, "Agreement does not exist");
+        Agreement storage a = agreements[agreementId];
+        require(milestoneIndex < a.milestones.length, "Invalid milestone index");
+        Milestone storage m = a.milestones[milestoneIndex];
+        return (m.description, m.payoutPercentage, m.reported, m.completed, m.reportedTimestamp, m.completedTimestamp);
     }
 
     function getMilestoneCount(uint256 agreementId) public view returns (uint256) {
-        // TODO(Person A): return agreements[agreementId].milestones.length
+        require(agreementId < agreementCount, "Agreement does not exist");
+        return agreements[agreementId].milestones.length;
     }
 
 
