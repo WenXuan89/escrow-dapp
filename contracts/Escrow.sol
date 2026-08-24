@@ -3,68 +3,67 @@ pragma solidity ^0.8.19;
 
 import "./ReputationToken.sol";
 
-/**
- * =====================================================================
- *  ESCROW.SOL — Decentralized Escrow & Milestone-Based Logistics
- *  (Version 2 — "verify then pay" model)
- * =====================================================================
- *  DESIGN CHANGE FROM v1:
- *  A milestone now has TWO steps instead of one:
- *    1. Carrier REPORTS it as done (reportMilestone) — no money moves yet.
- *    2. Shipper VERIFIES it (verifyMilestone) — THIS is what actually
- *       triggers the payout.
- *  If the Shipper disagrees with a reported milestone, OR the Carrier
- *  feels a legitimate report is being ignored, EITHER party can raise
- *  a dispute instead.
- * =====================================================================
- */
-
 contract Escrow {
-
-    // =================================================================
-    // SHARED — enums, structs, state variables, modifiers, events
-    // =================================================================
 
     enum Role { None, Shipper, Carrier }
 
     enum AgreementStatus {
-        Created,     // agreement exists, not yet funded
-        Funded,      // shipper has locked funds in escrow
-        InProgress,  // at least one milestone verified, not all
-        Completed,   // all milestones verified, fully paid out
-        Refunded,    // deadline missed, funds returned to shipper
-        Disputed     // a dispute has been raised, awaiting resolution
+        Created,     // agreement exists, not funded
+        Funded,      // funds locked in escrow
+        InProgress,  // at least one milestone verified
+        Completed,   // all milestones verified
+        Refunded,    // deadline missed, funds returned
+        Disputed     // await resolution
     }
 
     struct Milestone {
-        string description;
-        uint256 payoutPercentage;   // e.g. 30 = 30% of totalValue
-        bool reported;              // Carrier says "I've done this"
-        bool completed;             // Shipper has verified + been paid out
+        uint8 milestoneType;
+        string otherDescription;
+        uint256 payoutPercentage;   
+        bool reported;              
+        bool completed;            
         uint256 reportedTimestamp;
         uint256 completedTimestamp;
+
     }
 
     struct Agreement {
         uint256 id;
         address shipper;
         address carrier;
-        uint256 totalValue;         // total Wei to be escrowed
-        uint256 fundedAmount;       // Wei actually deposited so far
-        uint256 releasedAmount;     // Wei already paid out to carrier
-        uint256 deadline;           // unix timestamp
+        uint256 totalValue;        
+        uint256 fundedAmount;     
+        uint256 releasedAmount;     
+        uint256 deadline;         
         AgreementStatus status;
+
         Milestone[] milestones;
+
+        uint8 disputeReason;
+        string disputeOtherReason;
+        
+        Evidence[] evidence;
+    }
+
+    struct Evidence {
+        address submittedBy;
+        string description;
+        string fileCID;
+        uint256 timestamp;
     }
 
     mapping(uint256 => Agreement) public agreements;
     mapping(address => Role) public userRole;
-    address[] public carrierList;   // every address that has registered as a Carrier
+
+    mapping(address => uint256[]) public userAgreements;
+
+    address[] public carrierList;   
     uint256 public agreementCount;
+    bool private locked;
 
     ReputationToken public reputationToken;
+    address public arbitrator;
 
-    // ---- Events (used by frontend to show tx history / update UI) ----
     event UserRegistered(address indexed user, Role role);
     event AgreementCreated(uint256 indexed agreementId, address indexed shipper, address indexed carrier, uint256 totalValue, uint256 deadline);
     event AgreementFunded(uint256 indexed agreementId, uint256 amount);
@@ -73,8 +72,7 @@ contract Escrow {
     event AgreementRefunded(uint256 indexed agreementId, uint256 amount);
     event DisputeRaised(uint256 indexed agreementId, address indexed raisedBy);
     event DisputeResolved(uint256 indexed agreementId, string resolution);
-
-    // ---- Modifiers (shared guard logic — see Lab 7.3) ----
+    event EvidenceSubmitted(uint256 indexed agreementId, address indexed submittedBy, string fileCID);
 
     modifier onlyRegistered() {
         require(userRole[msg.sender] != Role.None, "Not registered");
@@ -82,12 +80,12 @@ contract Escrow {
     }
 
     modifier onlyShipperOf(uint256 agreementId) {
-        require(agreements[agreementId].shipper == msg.sender, "Not the shipper of this agreement");
+        require(agreements[agreementId].shipper == msg.sender, "Not the agreement's shipper");
         _;
     }
 
     modifier onlyCarrierOf(uint256 agreementId) {
-        require(agreements[agreementId].carrier == msg.sender, "Not the carrier of this agreement");
+        require(agreements[agreementId].carrier == msg.sender, "Not the agreement's carrier");
         _;
     }
 
@@ -109,24 +107,25 @@ contract Escrow {
         _;
     }
 
+    modifier nonReentrant() {
+        require(!locked, "Reentrant call blocked");
+        locked = true;
+        _;
+        locked = false;
+    }
+
     constructor(address reputationTokenAddress) {
         require(
-            reputationTokenAddress != address(0),
-            "Invalid reputation token address"
+            reputationTokenAddress != address(0), "Invalid reputation token address"
         );
-
-        reputationToken = ReputationToken(
-            reputationTokenAddress
-        );
-        arbitrator = msg.sender;   // whoever deploys the contract becomes the arbitrator
+        reputationToken = ReputationToken(reputationTokenAddress);
+        arbitrator = msg.sender; 
     }
 
     // =================================================================
-    // SECTION A — Registration, Agreement Creation & Milestone Reporting
-    // Owner: Person A
+    // Registration, Agreement Creation & Milestone Reporting
     // =================================================================
 
-    /// @notice Register the caller as a Shipper or Carrier.
     function registerUser(Role role) public {
         require(role == Role.Shipper || role == Role.Carrier, "Invalid role");
         require(userRole[msg.sender] == Role.None, "Already registered");
@@ -140,28 +139,30 @@ contract Escrow {
         emit UserRegistered(msg.sender, role);
     }
 
-    /// @notice Returns every address currently registered as a Carrier.
     function getAllCarriers() public view returns (address[] memory) {
         return carrierList;
     }
 
-    /// @notice Shipper creates a new logistics agreement with a carrier.
     function createAgreement(
         address carrier,
         uint256 totalValue,
         uint256 deadline,
-        string[] memory milestoneDescriptions,
+        uint8[] memory milestoneTypes,
+        string[] memory milestoneOtherDescriptions,
         uint256[] memory milestonePercentages
     ) public onlyRegistered {
-        require(userRole[msg.sender] == Role.Shipper, "Only a Shipper can create an agreement");
+        require(userRole[msg.sender] == Role.Shipper, "Only Shipper can create agreement");
         require(userRole[carrier] == Role.Carrier, "Selected address is not a registered Carrier");
+        require(carrier != msg.sender, "Shipper and carrier must be different addresses");
         require(deadline > block.timestamp, "Deadline must be in the future");
         require(totalValue > 0, "Total value must be greater than zero");
+        require(milestoneTypes.length > 0, "At least one milestone required");
         require(
-            milestoneDescriptions.length == milestonePercentages.length,
+            milestoneTypes.length == milestonePercentages.length,
             "Milestone array length mismatch"
         );
-        require(milestoneDescriptions.length > 0, "At least one milestone required");
+        require(milestoneTypes.length == milestoneOtherDescriptions.length, 
+        "Milestone description array length mismatch");
 
         uint256 sum = 0;
         for (uint256 i = 0; i < milestonePercentages.length; i++) {
@@ -177,26 +178,48 @@ contract Escrow {
         a.totalValue = totalValue;
         a.deadline = deadline;
         a.status = AgreementStatus.Created;
-        // fundedAmount and releasedAmount default to 0 automatically
 
-        for (uint256 i = 0; i < milestoneDescriptions.length; i++) {
-            a.milestones.push(Milestone({
-                description: milestoneDescriptions[i],
-                payoutPercentage: milestonePercentages[i],
-                reported: false,
-                completed: false,
-                reportedTimestamp: 0,
-                completedTimestamp: 0
-            }));
+        for (uint256 i = 0; i < milestoneTypes.length; i++) {
+            require(
+                milestoneTypes[i] >= 1 &&
+                milestoneTypes[i] <= 6,
+                "Invalid milestone type"
+            );
+
+            require(
+                milestonePercentages[i] > 0,
+                "Milestone percentage must be greater than zero"
+            );
+            
+            if (milestoneTypes[i] == 6) {
+                require(
+                    bytes(milestoneOtherDescriptions[i]).length > 0,
+                    "Other description required"
+                );
+            }
+
+            a.milestones.push(
+                Milestone({
+                    milestoneType: milestoneTypes[i],
+                    otherDescription: milestoneOtherDescriptions[i],
+                    payoutPercentage: milestonePercentages[i],
+                    reported: false,
+                    completed: false,
+                    reportedTimestamp: 0,
+                    completedTimestamp: 0
+                })
+            );
         }
+
+        // added 
+        userAgreements[msg.sender].push(newId);
+        userAgreements[carrier].push(newId);
 
         agreementCount++;
 
         emit AgreementCreated(newId, msg.sender, carrier, totalValue, deadline);
     }
 
-    /// @notice Carrier reports that a milestone has been physically
-    /// completed. This does NOT release any funds yet.
     function reportMilestone(uint256 agreementId, uint256 milestoneIndex)
         public
         onlyCarrierOf(agreementId)
@@ -220,7 +243,6 @@ contract Escrow {
         emit MilestoneReported(agreementId, milestoneIndex, block.timestamp);
     }
 
-    /// @notice Read a single agreement's core details (for frontend display)
     function getAgreement(uint256 agreementId) public view returns (
         address shipper,
         address carrier,
@@ -235,20 +257,47 @@ contract Escrow {
         return (a.shipper, a.carrier, a.totalValue, a.fundedAmount, a.releasedAmount, a.deadline, a.status);
     }
 
-    /// @notice Read a single milestone's details (for frontend display)
+    function getUserAgreements(address user)
+        public 
+        view 
+        returns (uint256[] memory)
+    {
+        return userAgreements[user];
+    }
+
+
     function getMilestone(uint256 agreementId, uint256 milestoneIndex) public view returns (
-        string memory description,
+        uint8 milestoneType,
+        string memory otherDescription,
         uint256 payoutPercentage,
         bool reported,
         bool completed,
         uint256 reportedTimestamp,
         uint256 completedTimestamp
     ) {
-        require(agreementId < agreementCount, "Agreement does not exist");
+        require(
+            agreementId < agreementCount,
+            "Agreement does not exist"
+            );
+            
         Agreement storage a = agreements[agreementId];
-        require(milestoneIndex < a.milestones.length, "Invalid milestone index");
+        
+        require(
+            milestoneIndex < a.milestones.length,
+            "Invalid milestone index"
+             );
+
         Milestone storage m = a.milestones[milestoneIndex];
-        return (m.description, m.payoutPercentage, m.reported, m.completed, m.reportedTimestamp, m.completedTimestamp);
+
+        return (
+            m.milestoneType,
+            m.otherDescription,
+            m.payoutPercentage,
+            m.reported,
+            m.completed,
+            m.reportedTimestamp,
+            m.completedTimestamp
+        );
     }
 
     function getMilestoneCount(uint256 agreementId) public view returns (uint256) {
@@ -256,47 +305,45 @@ contract Escrow {
         return agreements[agreementId].milestones.length;
     }
 
+    function fundAgreement(uint256 agreementId)
+        public
+        payable
+        onlyShipperOf(agreementId)
+        inStatus(agreementId, AgreementStatus.Created)
+    {
+        Agreement storage agreement = agreements[agreementId];
 
-    // =================================================================
-    // Funding & Shipper Verification / Payout
-    // =================================================================
-   /**
-     * @notice Shipper verifies a milestone reported by the carrier.
-     *
-     * Verification triggers the payout.
-     */
-    function verifyMilestone(
-        uint256 agreementId,
-        uint256 milestoneIndex
-    )
+        require(msg.value == agreement.totalValue, "Must fund exact total value in one transaction");
+
+        agreement.fundedAmount = msg.value;
+        agreement.status = AgreementStatus.Funded;
+
+        emit AgreementFunded(agreementId, msg.value);
+    }
+
+    function verifyMilestone(uint256 agreementId,uint256 milestoneIndex)
         public
         onlyShipperOf(agreementId)
+        nonReentrant
     {
-        Agreement storage agreement =
-            agreements[agreementId];
-
+        Agreement storage agreement = agreements[agreementId];
+        
         require(
-            agreement.status == AgreementStatus.Funded ||
-            agreement.status == AgreementStatus.InProgress,
+            agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
             "Agreement not in a payable state"
         );
 
         require(
-            milestoneIndex < agreement.milestones.length,
-            "Invalid milestone index"
+            milestoneIndex < agreement.milestones.length, "Invalid milestone index"
         );
 
-        Milestone storage milestone =
-            agreement.milestones[milestoneIndex];
+        Milestone storage milestone = agreement.milestones[milestoneIndex];
 
         require(
-            milestone.reported,
-            "Milestone has not been reported yet"
+            milestone.reported, "Milestone has not been reported yet"
         );
 
-        require(
-            !milestone.completed,
-            "Milestone already verified"
+        require(!milestone.completed, "Milestone already verified"
         );
 
         uint256 payout =
@@ -306,47 +353,31 @@ contract Escrow {
             ) / 100;
 
         require(
-            payout > 0,
-            "Payout must be greater than zero"
+            payout > 0,"Payout must be greater than zero"
         );
 
         require(
-            agreement.releasedAmount + payout <=
-            agreement.fundedAmount,
+            agreement.releasedAmount + payout <= agreement.fundedAmount,
             "Payout exceeds escrow balance"
         );
 
-        /*
-         * Update the state before making the external payment.
-         */
         milestone.completed = true;
         milestone.completedTimestamp = block.timestamp;
 
         agreement.releasedAmount += payout;
 
-        /*
-         * Pay the carrier.
-         */
         (bool sent, ) =
             payable(agreement.carrier).call{
                 value: payout
             }("");
 
         require(
-            sent,
-            "Payment to carrier failed"
+            sent, "Payment to carrier failed"
         );
 
-        /*
-         * Check whether all milestones have been completed.
-         */
         bool allCompleted = true;
 
-        for (
-            uint256 i = 0;
-            i < agreement.milestones.length;
-            i++
-        ) {
+        for (uint256 i = 0; i < agreement.milestones.length; i++) {
             if (!agreement.milestones[i].completed) {
                 allCompleted = false;
                 break;
@@ -354,45 +385,26 @@ contract Escrow {
         }
 
         if (allCompleted) {
-            agreement.status =
-                AgreementStatus.Completed;
+            agreement.status = AgreementStatus.Completed;
 
-            /*
-             * Mint reputation only after all milestones
-             * have been successfully verified.
-             */
             reputationToken.mint(
                 agreement.carrier,
-                agreement.totalValue
+                100
             );
         } else {
-            agreement.status =
-                AgreementStatus.InProgress;
+            agreement.status = AgreementStatus.InProgress;
         }
 
-        emit MilestoneVerified(
-            agreementId,
-            milestoneIndex,
-            payout
+        emit MilestoneVerified(agreementId, milestoneIndex, payout
         );
     }
-
-
-    // =================================================================
-    // Deadlines, Disputes, Refunds & Reputation Token
-    // =================================================================
-
-address public arbitrator;
 
     modifier onlyArbitrator() {
         require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
         _;
     }
 
-    /// @notice Anyone can call this after the deadline to trigger a
-    /// refund of remaining escrowed funds back to the shipper if not
-    /// all milestones were verified in time.
-    function checkAndRefund(uint256 agreementId) public {
+    function checkAndRefund(uint256 agreementId) public nonReentrant {
         Agreement storage agreement = agreements[agreementId];
 
         require(block.timestamp > agreement.deadline, "Deadline has not passed yet");
@@ -412,25 +424,47 @@ address public arbitrator;
         emit AgreementRefunded(agreementId, remaining);
     }
 
-    /// @notice EITHER the shipper or the carrier can raise a dispute.
-    function raiseDispute(uint256 agreementId) public onlyParticipant(agreementId) {
+    function raiseDispute(
+        uint256 agreementId,
+        uint8 reason,
+        string memory otherReason
+    )
+    public onlyParticipant(agreementId) {
         Agreement storage agreement = agreements[agreementId];
-
+        
+        require(
+            block.timestamp <= agreement.deadline,
+            "Deadline has passed"
+        );
+        
         require(
             agreement.status == AgreementStatus.Funded || agreement.status == AgreementStatus.InProgress,
             "Cannot dispute an inactive or finalized agreement"
         );
 
+        require(reason >= 1 && reason <= 5, "Invalid dispute reason");
+
+        if(reason == 5) {
+            require(bytes(otherReason).length > 0, "Other reason required");
+        } else {
+            require(
+                bytes(otherReason).length == 0,
+                "Other reason should be empty"
+            );
+        }
+
+        agreement.disputeReason = reason;
+        agreement.disputeOtherReason = otherReason;
         agreement.status = AgreementStatus.Disputed;
+    
 
         emit DisputeRaised(agreementId, msg.sender);
     }
 
-    /// @notice Resolution mechanism — designated arbitrator decides
-    /// whether to refund shipper or release remaining funds to carrier.
     function resolveDispute(uint256 agreementId, bool refundShipper)
         public
         onlyArbitrator
+        nonReentrant
     {
         Agreement storage agreement = agreements[agreementId];
 
@@ -453,9 +487,76 @@ address public arbitrator;
                 require(sent, "Payout to carrier failed");
             }
 
-            reputationToken.mint(agreement.carrier, agreement.totalValue);
+            reputationToken.mint(agreement.carrier, 100);
 
             emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds paid to carrier");
         }
+    }
+
+    /// @notice Participant submits evidence while a dispute is open, for the arbitrator to review.
+    function submitEvidence(
+        uint256 agreementId,
+        string memory description,
+        string memory fileCID
+    )
+        public
+        onlyParticipant(agreementId)
+    {
+        Agreement storage agreement = agreements[agreementId];
+
+        require(
+            agreement.status == AgreementStatus.Disputed,
+            "Agreement is not disputed"
+        );
+
+        require(
+            bytes(description).length > 0,
+            "Description required"
+        );
+
+        agreement.evidence.push(
+            Evidence({
+                submittedBy: msg.sender,
+                description: description,
+                fileCID: fileCID,
+                timestamp: block.timestamp
+            })
+        );
+
+        emit EvidenceSubmitted(
+            agreementId,
+            msg.sender,
+            fileCID
+        );
+    }
+
+    /// @notice How many pieces of evidence have been submitted for an agreement.
+    function getEvidenceCount(uint256 agreementId) public view returns (uint256) {
+        require(agreementId < agreementCount, "Agreement does not exist");
+        return agreements[agreementId].evidence.length;
+    }
+
+    /// @notice Read a single piece of evidence (for the arbitrator/UI to review before resolving).
+    function getEvidence(uint256 agreementId, uint256 evidenceIndex) public view returns (
+        address submittedBy,
+        string memory description,
+        string memory fileCID,
+        uint256 timestamp
+    ) {
+        require(agreementId < agreementCount, "Agreement does not exist");
+        Agreement storage a = agreements[agreementId];
+        require(evidenceIndex < a.evidence.length, "Invalid evidence index");
+        Evidence storage e = a.evidence[evidenceIndex];
+        return (e.submittedBy, e.description, e.fileCID, e.timestamp);
+    }
+
+    /// @notice Read the reason a dispute was raised (for the arbitrator/UI).
+    function getDisputeReason(uint256 agreementId) public view returns (
+        uint8 reason,
+        string memory otherReason
+    ) {
+        require(agreementId < agreementCount, "Agreement does not exist");
+        Agreement storage a = agreements[agreementId];
+        return (a.disputeReason, a.disputeOtherReason);
     }
 }
