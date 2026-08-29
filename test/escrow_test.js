@@ -66,6 +66,43 @@ contract('Escrow + ReputationToken', (accounts) => {
     });
   });
 
+
+  // Display name (optional, shared, readable by both roles)
+  describe('setDisplayName', () => {
+    beforeEach(async () => {
+      await escrow.registerUser(1, { from: shipper });
+      await escrow.registerUser(2, { from: carrier });
+    });
+ 
+    it('lets a registered user set a display name, readable by anyone', async () => {
+      await escrow.setDisplayName('Acme Shipping Co', { from: shipper });
+      await escrow.setDisplayName('FastTrack Logistics', { from: carrier });
+ 
+      // shipper can see the carrier's name, and vice versa -- same shared lookup
+      assert.equal(await escrow.displayName(carrier), 'FastTrack Logistics');
+      assert.equal(await escrow.displayName(shipper), 'Acme Shipping Co');
+    });
+ 
+    it('defaults to an empty name if never set', async () => {
+      assert.equal(await escrow.displayName(carrier), '');
+    });
+ 
+    it('lets a user update their display name later', async () => {
+      await escrow.setDisplayName('Old Name', { from: carrier });
+      await escrow.setDisplayName('New Name', { from: carrier });
+      assert.equal(await escrow.displayName(carrier), 'New Name');
+    });
+ 
+    it('rejects an unregistered address setting a display name', async () => {
+      await expectRevert(escrow.setDisplayName('Nope', { from: stranger }), 'Not registered');
+    });
+ 
+    it('rejects a display name over 64 characters', async () => {
+      const tooLong = 'x'.repeat(65);
+      await expectRevert(escrow.setDisplayName(tooLong, { from: shipper }), 'too long');
+    });
+  });
+
   // Agreement creation validation
   describe('createAgreement', () => {
     beforeEach(async () => {
@@ -85,58 +122,6 @@ contract('Escrow + ReputationToken', (accounts) => {
         { from: shipper }
       );
       assert.equal((await escrow.agreementCount()).toString(), '1');
-    
-      it('tracks multiple agreements for both shipper and carrier', async () => {
-        const deadline1 =
-          (await web3.eth.getBlock('latest')).timestamp + 3600;
-
-        const deadline2 =
-          deadline1 + 3600;
-
-      // First agreement
-        await escrow.createAgreement(
-          carrier,
-          web3.utils.toWei('1', 'ether'),
-          deadline1,
-          [MILESTONE_PICKUP],
-          [''],
-          [100],
-          { from: shipper }
-        );
-
-       // Second agreement
-      await escrow.createAgreement(
-        carrier,
-        web3.utils.toWei('2', 'ether'),
-        deadline2,
-        [MILESTONE_PICKUP],
-        [''],
-        [100],
-        { from: shipper }
-      );
-
-      // Global agreement count
-      assert.equal(
-        (await escrow.agreementCount()).toString(),
-        '2'
-      );
-
-      // Shipper should see both agreements
-      const shipperIds =
-        await escrow.getUserAgreements(shipper);
-
-      assert.equal(shipperIds.length, 2);
-      assert.equal(shipperIds[0].toString(), '0');
-      assert.equal(shipperIds[1].toString(), '1');
-
-      // Carrier should also see both agreements
-      const carrierIds =
-        await escrow.getUserAgreements(carrier);
-
-      assert.equal(carrierIds.length, 2);
-      assert.equal(carrierIds[0].toString(), '0');
-      assert.equal(carrierIds[1].toString(), '1');
-    });
 
       // Check shipper's agreements
       const shipperIds = await escrow.getUserAgreements(shipper);
@@ -149,6 +134,58 @@ contract('Escrow + ReputationToken', (accounts) => {
 
       assert.equal(carrierIds.length, 1);
       assert.equal(carrierIds[0].toString(), '0');  
+    });
+
+    it('tracks multiple agreements for both shipper and carrier', async () => {
+      const deadline1 =
+        (await web3.eth.getBlock('latest')).timestamp + 3600;
+
+      const deadline2 =
+        deadline1 + 3600;
+
+    // First agreement
+      await escrow.createAgreement(
+        carrier,
+        web3.utils.toWei('1', 'ether'),
+        deadline1,
+        [MILESTONE_PICKUP],
+        [''],
+        [100],
+        { from: shipper }
+      );
+
+     // Second agreement
+    await escrow.createAgreement(
+      carrier,
+      web3.utils.toWei('2', 'ether'),
+      deadline2,
+      [MILESTONE_PICKUP],
+      [''],
+      [100],
+      { from: shipper }
+    );
+
+    // Global agreement count
+    assert.equal(
+      (await escrow.agreementCount()).toString(),
+      '2'
+    );
+
+    // Shipper should see both agreements
+    const shipperIds =
+      await escrow.getUserAgreements(shipper);
+
+    assert.equal(shipperIds.length, 2);
+    assert.equal(shipperIds[0].toString(), '0');
+    assert.equal(shipperIds[1].toString(), '1');
+
+    // Carrier should also see both agreements
+    const carrierIds =
+      await escrow.getUserAgreements(carrier);
+
+    assert.equal(carrierIds.length, 2);
+    assert.equal(carrierIds[0].toString(), '0');
+    assert.equal(carrierIds[1].toString(), '1');
     });
 
     it('rejects milestone type "Other" (6) with an empty description', async () => {
@@ -292,14 +329,14 @@ contract('Escrow + ReputationToken', (accounts) => {
     it('pays the carrier proportionally on each verified milestone and mints flat reputation on completion', async () => {
       const carrierBalBefore = new web3.utils.BN(await web3.eth.getBalance(carrier));
 
-      await escrow.reportMilestone(agreementId, 0, { from: carrier });
+      await escrow.reportMilestone(agreementId, 0, '', { from: carrier });
       await escrow.verifyMilestone(agreementId, 0, { from: shipper });
 
       let a = await escrow.getAgreement(agreementId);
       assert.equal(a.status.toString(), '2'); // InProgress
       assert.equal(a.releasedAmount.toString(), web3.utils.toWei('0.4', 'ether'));
 
-      await escrow.reportMilestone(agreementId, 1, { from: carrier });
+      await escrow.reportMilestone(agreementId, 1, '', { from: carrier });
       await escrow.verifyMilestone(agreementId, 1, { from: shipper });
 
       a = await escrow.getAgreement(agreementId);
@@ -322,18 +359,30 @@ contract('Escrow + ReputationToken', (accounts) => {
 
     it('rejects a non-carrier reporting a milestone', async () => {
       await expectRevert(
-        escrow.reportMilestone(agreementId, 0, { from: stranger }),
+        escrow.reportMilestone(agreementId, 0, '', { from: stranger }),
         "agreement's carrier"
       );
     });
 
     it('rejects double-verifying the same milestone', async () => {
-      await escrow.reportMilestone(agreementId, 0, { from: carrier });
+      await escrow.reportMilestone(agreementId, 0, '', { from: carrier });
       await escrow.verifyMilestone(agreementId, 0, { from: shipper });
       await expectRevert(
         escrow.verifyMilestone(agreementId, 0, { from: shipper }),
         'already verified'
       );
+    });
+
+    it('stores and returns a photo-proof CID attached to a milestone report', async () => {
+      await escrow.reportMilestone(agreementId, 0, 'QmPhotoProofHash123', { from: carrier });
+      const m = await escrow.getMilestone(agreementId, 0);
+      assert.equal(m.proofCID, 'QmPhotoProofHash123');
+    });
+ 
+    it('allows reporting with no proof (empty CID is valid)', async () => {
+      await escrow.reportMilestone(agreementId, 0, '', { from: carrier });
+      const m = await escrow.getMilestone(agreementId, 0);
+      assert.equal(m.proofCID, '');
     });
 
     it('awards another 100 reputation points for each completed agreement', async () => {
@@ -363,6 +412,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.reportMilestone(
         secondAgreementId,
         0,
+        '',
         { from: carrier }
       );
 

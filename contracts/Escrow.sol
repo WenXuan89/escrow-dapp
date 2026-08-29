@@ -24,7 +24,7 @@ contract Escrow {
         bool completed;            
         uint256 reportedTimestamp;
         uint256 completedTimestamp;
-
+        string proofCID;  // IPFS CID of photo/document proof (optional, empty allowed)
     }
 
     struct Agreement {
@@ -55,6 +55,12 @@ contract Escrow {
     mapping(uint256 => Agreement) public agreements;
     mapping(address => Role) public userRole;
 
+    // Optional, human-friendly label a user can set for themselves (a name,
+    // company name, or handle -- doesn't have to be their real identity).
+    // Anyone can read anyone else's, so a Shipper can recognise a Carrier
+    // and vice versa, instead of only ever seeing raw wallet addresses.
+    mapping(address => string) public displayName;
+
     mapping(address => uint256[]) public userAgreements;
 
     address[] public carrierList;   
@@ -65,6 +71,7 @@ contract Escrow {
     address public arbitrator;
 
     event UserRegistered(address indexed user, Role role);
+    event DisplayNameUpdated(address indexed user, string displayName);
     event AgreementCreated(uint256 indexed agreementId, address indexed shipper, address indexed carrier, uint256 totalValue, uint256 deadline);
     event AgreementFunded(uint256 indexed agreementId, uint256 amount);
     event MilestoneReported(uint256 indexed agreementId, uint256 milestoneIndex, uint256 timestamp);
@@ -139,6 +146,12 @@ contract Escrow {
         emit UserRegistered(msg.sender, role);
     }
 
+    function setDisplayName(string memory name) public onlyRegistered {
+        require(bytes(name).length <= 64, "Display name is too long");
+        displayName[msg.sender] = name;
+        emit DisplayNameUpdated(msg.sender, name);
+    }
+
     function getAllCarriers() public view returns (address[] memory) {
         return carrierList;
     }
@@ -206,7 +219,8 @@ contract Escrow {
                     reported: false,
                     completed: false,
                     reportedTimestamp: 0,
-                    completedTimestamp: 0
+                    completedTimestamp: 0,
+                    proofCID: ""
                 })
             );
         }
@@ -220,7 +234,7 @@ contract Escrow {
         emit AgreementCreated(newId, msg.sender, carrier, totalValue, deadline);
     }
 
-    function reportMilestone(uint256 agreementId, uint256 milestoneIndex)
+    function reportMilestone(uint256 agreementId, uint256 milestoneIndex, string memory proofCID)
         public
         onlyCarrierOf(agreementId)
         beforeDeadline(agreementId)
@@ -239,6 +253,7 @@ contract Escrow {
 
         m.reported = true;
         m.reportedTimestamp = block.timestamp;
+        m.proofCID = proofCID;
 
         emit MilestoneReported(agreementId, milestoneIndex, block.timestamp);
     }
@@ -273,7 +288,8 @@ contract Escrow {
         bool reported,
         bool completed,
         uint256 reportedTimestamp,
-        uint256 completedTimestamp
+        uint256 completedTimestamp,
+        string memory proofCID
     ) {
         require(
             agreementId < agreementCount,
@@ -296,7 +312,8 @@ contract Escrow {
             m.reported,
             m.completed,
             m.reportedTimestamp,
-            m.completedTimestamp
+            m.completedTimestamp,
+            m.proofCID
         );
     }
 
