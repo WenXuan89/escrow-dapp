@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "lite-server",
+    "compile": "truffle compile",
+    "migrate": "truffle migrate --reset",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -23,6 +25,10 @@
   },
   "homepage": "https://github.com/WenXuan89/escrow-dapp#readme",
   "devDependencies": {
-    "lite-server": "^2.6.1"
+    "lite-server": "^2.6.1",
+    "truffle": "^5.11.5"
+  },
+  "dependencies": {
+    "web3": "^1.10.4"
   }
 }
