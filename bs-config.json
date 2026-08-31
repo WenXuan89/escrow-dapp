@@ -1,0 +1,17 @@
+{
+  "port": 3000,
+  "ui": false,
+  "files": [
+    "src/**/*.{html,css,js}",
+    "build/contracts/Escrow.json"
+  ],
+  "server": {
+    "baseDir": "./src",
+    "routes": {
+      "/contracts": "./build/contracts",
+      "/vendor": "./node_modules/web3/dist"
+    }
+  },
+  "notify": false,
+  "open": false
+}
