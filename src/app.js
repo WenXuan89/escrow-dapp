@@ -266,11 +266,7 @@ async function refreshBalances() {
 async function refreshCarriers() {
   if (state.demo) return;
   const addresses = await state.contract.methods.getAllCarriers().call();
-  state.carriers = await Promise.all(addresses.map(async address => {
-    let name = "";
-    try { name = await state.contract.methods.displayName(address).call(); } catch (_) { /* optional label */ }
-    return { address, name: name || "Registered carrier" };
-  }));
+  state.carriers = addresses.map(address => ({ address, name: "Registered carrier" }));
 }
 
 async function agreementIdsForCurrentUser() {
@@ -304,8 +300,7 @@ async function loadAgreement(id, includeEvidence = false) {
       reported: Boolean(valueAt(milestone, "reported", 3)),
       completed: Boolean(valueAt(milestone, "completed", 4)),
       reportedTimestamp: Number(valueAt(milestone, "reportedTimestamp", 5)),
-      completedTimestamp: Number(valueAt(milestone, "completedTimestamp", 6)),
-      proofCID: valueAt(milestone, "proofCID", 7)
+      completedTimestamp: Number(valueAt(milestone, "completedTimestamp", 6))
     };
   }));
   if (includeEvidence && agreement.status === 5) {
@@ -510,7 +505,6 @@ function milestoneName(milestone) {
 
 function cidLink(cid) {
   if (!cid) return "";
-  const safe = escapeHtml(cid);
   return `<a href="https://ipfs.io/ipfs/${encodeURIComponent(cid)}" target="_blank" rel="noopener">View IPFS proof ↗</a>`;
 }
 
@@ -524,7 +518,7 @@ function milestoneButtons(agreement, milestone) {
 function timelineEvents(agreement) {
   const events = [];
   agreement.milestones.forEach(milestone => {
-    if (milestone.reportedTimestamp) events.push({ timestamp: milestone.reportedTimestamp, title: `${milestoneName(milestone)} reported`, note: milestone.proofCID ? `Proof CID: ${milestone.proofCID}` : "No proof CID attached" });
+    if (milestone.reportedTimestamp) events.push({ timestamp: milestone.reportedTimestamp, title: `${milestoneName(milestone)} reported`, note: "Awaiting shipper verification" });
     if (milestone.completedTimestamp) events.push({ timestamp: milestone.completedTimestamp, title: `${milestoneName(milestone)} verified`, note: `${milestone.percentage}% payout released` });
   });
   return events.sort((a, b) => b.timestamp - a.timestamp);
@@ -551,7 +545,7 @@ function renderAgreementDetail(agreement) {
       <div class="milestone-stepper">${agreement.milestones.map(milestone => `
         <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
           <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
-          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}</p></div>
+          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}</p></div>
           <span class="milestone-payout">${milestone.percentage}%</span>
           <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
         </div>`).join("")}</div>
@@ -579,8 +573,8 @@ function openActionDialog(action, milestoneIndex = null) {
   submit.textContent = "Confirm";
   if (action === "report") {
     title.textContent = "Report milestone";
-    description.textContent = "This records completion for the shipper to verify. An IPFS proof CID is optional.";
-    fields.innerHTML = `<label>Proof CID (optional)<input name="proofCID" type="text" placeholder="bafy…"></label>`;
+    description.textContent = "This records completion on-chain for the shipper to verify.";
+    fields.innerHTML = "";
     submit.textContent = "Report on-chain";
   } else if (action === "dispute") {
     title.textContent = "Raise a dispute";
@@ -618,7 +612,7 @@ async function submitAction(event) {
     return showToast("Transactions are disabled in preview mode.", "error");
   }
   try {
-    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex, String(data.get("proofCID") || "").trim()), {}, "Report milestone");
+    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex), {}, "Report milestone");
     if (action === "dispute") {
       const reason = Number(data.get("reason"));
       const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
@@ -656,20 +650,20 @@ function seedDemo() {
   ];
   state.agreements = [
     { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 2, milestones: [
-      { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000, proofCID: "bafybeipickup1042" },
-      { index: 1, type: 3, description: "", percentage: 30, reported: true, completed: false, reportedTimestamp: now - 3600, completedTimestamp: 0, proofCID: "bafybeitransit1042" },
-      { index: 2, type: 5, description: "", percentage: 40, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
+      { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000 },
+      { index: 1, type: 3, description: "", percentage: 30, reported: true, completed: false, reportedTimestamp: now - 3600, completedTimestamp: 0 },
+      { index: 2, type: 5, description: "", percentage: 40, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0 }
     ]},
     { id: 3, shipper: state.account, carrier: state.carriers[1].address, totalValue: 2.25, fundedAmount: 2.25, releasedAmount: 0, deadline: now + 36000, status: 5, disputeReason: 2, disputeOtherReason: "", evidence: [
       { submittedBy: state.account, description: "The attached image does not match the sealed cargo ID.", fileCID: "bafybaddocument", timestamp: now - 8200 }
     ], milestones: [
-      { index: 0, type: 1, description: "", percentage: 40, reported: true, completed: false, reportedTimestamp: now - 12000, completedTimestamp: 0, proofCID: "bafyproofshipment" },
-      { index: 1, type: 5, description: "", percentage: 60, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
+      { index: 0, type: 1, description: "", percentage: 40, reported: true, completed: false, reportedTimestamp: now - 12000, completedTimestamp: 0 },
+      { index: 1, type: 5, description: "", percentage: 60, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0 }
     ]},
     { id: 1, shipper: state.account, carrier: state.carriers[2].address, totalValue: 1.6, fundedAmount: 1.6, releasedAmount: 1.6, deadline: now - 604800, status: 3, milestones: [
-      { index: 0, type: 1, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 900000, completedTimestamp: now - 899000, proofCID: "" },
-      { index: 1, type: 3, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 800000, completedTimestamp: now - 799000, proofCID: "" },
-      { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000, proofCID: "bafyfinaldelivery" }
+      { index: 0, type: 1, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 900000, completedTimestamp: now - 899000 },
+      { index: 1, type: 3, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 800000, completedTimestamp: now - 799000 },
+      { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000 }
     ]}
   ];
   updateWalletHeader();

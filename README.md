@@ -71,13 +71,13 @@ This starts a local server (via `lite-server`) serving the frontend, typically a
 
 The UI reads the active deployment from `build/contracts/Escrow.json`. If the connected network has no recorded deployment, it shows a setup panel where you can paste an Escrow contract address manually. For a UI-only preview with sample agreements, open `http://localhost:3000/?demo=1`.
 
-### Fronted features
+### Frontend features
 
 - MetaMask connect flow with automatic account/network change handling
 - Arbitrator-first role routing, on-chain registration, and role-specific dashboards
 - Clickable registered carrier directory and validated agreement creation/funding
 - Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
-- Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
+- Carrier milestone reporting; shipper verification and payout release
 - Refund, dispute, evidence, and arbitrator resolution controls
 - Chronological milestone report/verification history
 
