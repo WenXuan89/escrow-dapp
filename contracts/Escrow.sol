@@ -27,6 +27,17 @@ contract Escrow {
         string proofCID;  // IPFS CID of photo/document proof (optional, empty allowed)
     }
 
+    struct AgreementDetails {
+        uint8 origin;
+        uint8 destination;
+        uint8 itemType;
+        uint8 size;
+        uint256 weight;
+        uint8 deliverySpeed;
+        uint8 guaranteeTier;
+        string photoCID;
+    }
+
     struct Agreement {
         uint256 id;
         address shipper;
@@ -43,6 +54,7 @@ contract Escrow {
         string disputeOtherReason;
         
         Evidence[] evidence;
+        AgreementDetails details;
     }
 
     struct Evidence {
@@ -50,6 +62,12 @@ contract Escrow {
         string description;
         string fileCID;
         uint256 timestamp;
+    }
+
+    struct CarrierProfile {
+        uint8 location;
+        uint8 deliveryTypes;
+        bool isSet;
     }
 
     mapping(uint256 => Agreement) public agreements;
@@ -63,6 +81,7 @@ contract Escrow {
 
     mapping(address => uint256[]) public userAgreements;
 
+    mapping(address => CarrierProfile) public carrierProfiles;
     address[] public carrierList;   
     uint256 public agreementCount;
     bool private locked;
@@ -81,6 +100,7 @@ contract Escrow {
     event DisputeResolved(uint256 indexed agreementId, string resolution);
     event EvidenceSubmitted(uint256 indexed agreementId, address indexed submittedBy, string fileCID);
 
+    event CarrierProfileUpdated(address indexed carrier, uint8 location, uint8 deliveryTypes);
     modifier onlyRegistered() {
         require(userRole[msg.sender] != Role.None, "Not registered");
         _;
@@ -152,6 +172,20 @@ contract Escrow {
         emit DisplayNameUpdated(msg.sender, name);
     }
 
+    function setCarrierProfile(uint8 location, uint8 deliveryTypes) public {
+        require(userRole[msg.sender] == Role.Carrier, "Only a registered Carrier can set a profile");
+        require(location >= 1 && location <= 15, "Invalid location");
+        require(deliveryTypes >= 1 && deliveryTypes <= 7, "Invalid delivery type bitmask");
+
+        carrierProfiles[msg.sender] = CarrierProfile({
+            location: location,
+            deliveryTypes: deliveryTypes,
+            isSet: true
+        });
+
+        emit CarrierProfileUpdated(msg.sender, location, deliveryTypes);
+    }
+
     function getAllCarriers() public view returns (address[] memory) {
         return carrierList;
     }
@@ -162,7 +196,8 @@ contract Escrow {
         uint256 deadline,
         uint8[] memory milestoneTypes,
         string[] memory milestoneOtherDescriptions,
-        uint256[] memory milestonePercentages
+        uint256[] memory milestonePercentages,
+        AgreementDetails memory details
     ) public onlyRegistered {
         require(userRole[msg.sender] == Role.Shipper, "Only Shipper can create agreement");
         require(userRole[carrier] == Role.Carrier, "Selected address is not a registered Carrier");
@@ -176,6 +211,14 @@ contract Escrow {
         );
         require(milestoneTypes.length == milestoneOtherDescriptions.length, 
         "Milestone description array length mismatch");
+
+        require(details.origin >= 1 && details.origin <= 15, "Invalid origin");
+        require(details.destination >= 1 && details.destination <= 15, "Invalid destination");
+        require(details.itemType >= 1 && details.itemType <= 6, "Invalid item type");
+        require(details.size >= 1 && details.size <= 4, "Invalid size");
+        require(details.weight > 0, "Weight must be greater than zero");
+        require(details.deliverySpeed >= 1 && details.deliverySpeed <= 4, "Invalid delivery speed");
+        require(details.guaranteeTier >= 1 && details.guaranteeTier <= 3, "Invalid guarantee tier");
 
         uint256 sum = 0;
         for (uint256 i = 0; i < milestonePercentages.length; i++) {
@@ -191,6 +234,7 @@ contract Escrow {
         a.totalValue = totalValue;
         a.deadline = deadline;
         a.status = AgreementStatus.Created;
+        a.details = details;
 
         for (uint256 i = 0; i < milestoneTypes.length; i++) {
             require(
@@ -225,7 +269,6 @@ contract Escrow {
             );
         }
 
-        // added 
         userAgreements[msg.sender].push(newId);
         userAgreements[carrier].push(newId);
 
@@ -270,6 +313,39 @@ contract Escrow {
         require(agreementId < agreementCount, "Agreement does not exist");
         Agreement storage a = agreements[agreementId];
         return (a.shipper, a.carrier, a.totalValue, a.fundedAmount, a.releasedAmount, a.deadline, a.status);
+    }
+
+    function getAgreementDetails(uint256 agreementId) public view returns (
+        uint8 origin,
+        uint8 destination,
+        uint8 itemType,
+        uint8 size,
+        uint256 weight,
+        uint8 deliverySpeed,
+        uint8 guaranteeTier,
+        string memory photoCID
+    ) {
+        require(agreementId < agreementCount, "Agreement does not exist");
+        AgreementDetails storage d = agreements[agreementId].details;
+        return (
+            d.origin,
+            d.destination,
+            d.itemType,
+            d.size,
+            d.weight,
+            d.deliverySpeed,
+            d.guaranteeTier,
+            d.photoCID
+        );
+    }
+
+    function getCarrierProfile(address carrier) public view returns (
+        uint8 location,
+        uint8 deliveryTypes,
+        bool isSet
+    ) {
+        CarrierProfile storage p = carrierProfiles[carrier];
+        return (p.location, p.deliveryTypes, p.isSet);
     }
 
     function getUserAgreements(address user)
