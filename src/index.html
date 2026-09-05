@@ -82,7 +82,7 @@
       <span class="section-label">A trust-minimised workflow</span>
       <div class="workflow-grid">
         <article><b>01</b><h3>Create & fund</h3><p>A shipper chooses a registered carrier, defines milestones and locks the exact agreement value.</p></article>
-        <article><b>02</b><h3>Report progress</h3><p>The assigned carrier reports each checkpoint on-chain as it is reached.</p></article>
+        <article><b>02</b><h3>Report progress</h3><p>The assigned carrier reports each checkpoint, optionally attaching an IPFS proof CID.</p></article>
         <article><b>03</b><h3>Verify & release</h3><p>Shipper verification releases the milestone payout directly from escrow to the carrier.</p></article>
       </div>
     </section>
@@ -127,7 +127,9 @@
         <nav aria-label="Dashboard sections">
           <button class="nav-item active" type="button" data-section-target="overviewSection"><span>⌂</span>Overview</button>
           <button class="nav-item" type="button" data-section-target="agreementsSection"><span>▤</span>Agreements <b id="agreementNavCount">0</b></button>
+          <button class="nav-item shipper-only" type="button" data-section-target="marketplaceSection"><span>⌕</span>Carrier marketplace</button>
           <button id="createNavItem" class="nav-item shipper-only" type="button" data-section-target="createSection"><span>＋</span>New agreement</button>
+          <button class="nav-item" type="button" data-section-target="profileSection"><span>◎</span>My profile</button>
           <button id="arbitrationNavItem" class="nav-item arbitrator-only hidden" type="button" data-section-target="agreementsSection"><span>⚖</span>Disputes</button>
         </nav>
         <div class="sidebar-foot"><span>Smart-contract secured</span><small id="contractAddressShort">Contract not loaded</small></div>
@@ -156,6 +158,10 @@
               <p class="panel-copy">Select a carrier to begin a new agreement.</p>
               <div id="carrierQuickList" class="carrier-quick-list"></div>
             </div>
+            <div class="panel span-two">
+              <div class="panel-heading"><div><span class="section-label">On-chain log</span><h3>Activity feed</h3></div></div>
+              <div id="activityFeed" class="activity-feed"><div class="skeleton-row"></div></div>
+            </div>
           </div>
         </section>
 
@@ -168,8 +174,22 @@
             <button class="filter-chip" type="button" data-filter="active">Active</button>
             <button class="filter-chip" type="button" data-filter="attention">Needs attention</button>
             <button class="filter-chip" type="button" data-filter="closed">Closed</button>
+            <label class="compact-filter">Month<input id="agreementMonth" type="month"></label>
+            <label class="compact-filter">Exact date<input id="agreementDate" type="date"></label>
+            <button id="clearDateFilters" class="text-button" type="button">Clear dates</button>
           </div>
           <div id="agreementGrid" class="agreement-grid"></div>
+        </section>
+
+        <section id="marketplaceSection" class="dashboard-section hidden shipper-only">
+          <div class="section-heading compact"><div><span class="section-label">Registered on-chain</span><h2>Carrier marketplace</h2><p>Search by display name or wallet, then filter by service area and delivery type.</p></div></div>
+          <div class="marketplace-tools">
+            <label>Search<input id="carrierSearch" type="search" placeholder="Name or 0x address"></label>
+            <label>Location<select id="carrierLocationFilter"><option value="0">All locations</option></select></label>
+            <label>Delivery type<select id="carrierSpeedFilter"><option value="0">All types</option><option value="1">Standard</option><option value="2">Express</option><option value="4">Same day</option></select></label>
+            <label>Sort<select id="carrierSort"><option value="name">Name A–Z</option><option value="reputation">Highest reputation</option></select></label>
+          </div>
+          <div id="carrierMarketplace" class="carrier-marketplace"></div>
         </section>
 
         <section id="createSection" class="dashboard-section hidden shipper-only">
@@ -182,7 +202,15 @@
             </div>
             <div class="form-panel split-fields">
               <div class="form-step"><b>2</b><div><h3>Agreement details</h3><p>The amount entered is locked in the Escrow contract.</p></div></div>
-              <label>Total value (ETH)<input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="2.50" required></label>
+              <label>Origin<select id="origin" name="origin" required></select></label>
+              <label>Destination<select id="destination" name="destination" required></select></label>
+              <label>Item type<select id="itemType" name="itemType" required><option value="1">Documents</option><option value="2">Electronics</option><option value="3">Food</option><option value="4">Clothing</option><option value="5">Fragile goods</option><option value="6">Other</option></select></label>
+              <label>Parcel size<select id="parcelSize" name="size" required><option value="1">Small</option><option value="2">Medium</option><option value="3">Large</option><option value="4">Oversized</option></select></label>
+              <label>Weight (kg)<input id="weight" name="weight" type="number" min="0.01" step="0.01" value="1" required></label>
+              <label>Delivery speed<select id="deliverySpeed" name="deliverySpeed" required><option value="1">Standard</option><option value="2">Express</option><option value="3">Same day</option><option value="4">Scheduled</option></select></label>
+              <label>Guarantee tier<select id="guaranteeTier" name="guaranteeTier" required><option value="1">Basic</option><option value="2">Protected</option><option value="3">Premium</option></select></label>
+              <label>Parcel photo CID (optional)<input id="photoCID" name="photoCID" type="text" placeholder="bafy…"></label>
+              <label>Total value (ETH)<input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="0.015" required><small id="priceSuggestion" class="field-help">Suggested price appears as shipment details change.</small></label>
               <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required></label>
             </div>
             <div class="form-panel">
@@ -195,6 +223,16 @@
               <button class="button button-primary button-large" type="submit">Create agreement <span>→</span></button>
             </div>
           </form>
+        </section>
+
+        <section id="profileSection" class="dashboard-section hidden">
+          <div class="section-heading compact"><div><span class="section-label">Public on-chain identity</span><h2>My profile</h2><p>Your display name helps participants recognise this wallet.</p></div></div>
+          <div class="content-grid profile-grid">
+            <form id="displayNameForm" class="panel form-panel"><h3>Display name</h3><label>Name or company<input id="displayNameInput" type="text" maxlength="64" placeholder="Example Logistics"></label><button class="button button-primary" type="submit">Save name</button></form>
+            <article class="panel reputation-card"><span class="section-label">Reputation token</span><strong id="reputationStars">☆☆☆☆☆</strong><h3 id="reputationPoints">0 points</h3><p>Completed deliveries mint reputation tokens to carriers.</p></article>
+            <form id="carrierProfileForm" class="panel form-panel carrier-only"><h3>Carrier service profile</h3><label>Primary location<select id="profileLocation"></select></label><fieldset><legend>Delivery types</legend><label class="check-label"><input name="deliveryType" type="checkbox" value="1">Standard</label><label class="check-label"><input name="deliveryType" type="checkbox" value="2">Express</label><label class="check-label"><input name="deliveryType" type="checkbox" value="4">Same day</label></fieldset><button class="button button-primary" type="submit">Save carrier profile</button></form>
+            <article id="backendNotice" class="panel compatibility-card"><span class="section-label">Integration status</span><h3>Contract capability check</h3><p id="backendCapabilityText">Checking deployed ABI…</p></article>
+          </div>
         </section>
       </div>
     </section>

@@ -75,11 +75,17 @@ The UI reads the active deployment from `build/contracts/Escrow.json`. If the co
 
 - MetaMask connect flow with automatic account/network change handling
 - Arbitrator-first role routing, on-chain registration, and role-specific dashboards
-- Clickable registered carrier directory and validated agreement creation/funding
+- Searchable, sortable carrier marketplace with location, delivery-type, profile, and reputation filters
+- Route-aware carrier selection and agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
+- Editable browser-calculated price suggestion and duplicate-milestone validation
 - Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
-- Carrier milestone reporting; shipper verification and payout release
+- Month and exact-date agreement filters, plus active agreements ordered by nearest deadline
+- Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
 - Refund, dispute, evidence, and arbitrator resolution controls
-- Chronological milestone report/verification history
+- Chronological milestone report/verification history and recent on-chain account activity
+- Editable display names, carrier service profiles, and ReputationToken point/star display
+
+On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.
 
 ## Connecting MetaMask to your local Ganache network
 
@@ -115,3 +121,4 @@ git push origin your-branch-name
 - Milestone completion is self-reported by the Carrier and verified by the Shipper; there is no external IoT/GPS/oracle integration to confirm real-world delivery.
 - Dispute resolution authority (who may call `resolveDispute()`) is documented in the Design Document.
 - Reputation tokens are reward-only in the current scope; a penalty mechanism is sketched as an optional future enhancement.
+- The current `Escrow.sol` ABI does not yet expose the proposed carrier accept/reject workflow, deadline extension, admin commission withdrawal, or adjustable reward settings. The frontend reports this capability gap and does not show transaction controls that would revert or call missing methods.
