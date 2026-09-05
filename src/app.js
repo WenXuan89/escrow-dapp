@@ -180,6 +180,10 @@ async function initializeContract(manualAddress = null) {
       if (!response.ok) throw new Error("Escrow artifact was not found. Compile the contracts first.");
       state.artifact = await response.json();
     }
+
+    console.log("chainId =", state.chainId);
+    console.log("Escrow networks =", state.artifact.networks);
+
     const savedAddress = localStorage.getItem(`escrowAddress:${state.chainId}`);
     const deployed = state.artifact.networks?.[String(state.chainId)]?.address;
     const address = manualAddress || savedAddress || deployed;
