@@ -626,6 +626,7 @@ async function createAgreement(event) {
   if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
   if (details[0] === details[1]) return showToast("Origin and destination must be different.", "error");
   if (Number(details[4]) <= 0) return showToast("Weight must be greater than zero.", "error");
+  if ($("#parcelPhotoFile").files?.length && !details[7]) return showToast("The selected parcel photo is only a local preview. Upload it to IPFS and enter its CID or image URL before creating the agreement.", "error");
   const totalValue = state.web3.utils.toWei(ethValue, "ether");
   try {
     const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
@@ -659,7 +660,43 @@ function milestoneName(milestone) {
 
 function cidLink(cid) {
   if (!cid) return "";
-  return `<a href="https://ipfs.io/ipfs/${encodeURIComponent(cid)}" target="_blank" rel="noopener">View IPFS proof ↗</a>`;
+  const url = imageUrl(cid);
+  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View proof ↗</a>` : `<span>${escapeHtml(cid)}</span>`;
+}
+
+function imageUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const ipfsPath = raw.replace(/^ipfs:\/\//i, "").replace(/^\/ipfs\//i, "");
+  if (/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(ipfsPath)) return `https://ipfs.io/ipfs/${ipfsPath.split("/").map(encodeURIComponent).join("/")}`;
+  return "";
+}
+
+function imageProof(cid, alt, caption = "Open original") {
+  const url = imageUrl(cid);
+  if (!url) return "";
+  return `<figure class="proof-image"><a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy" data-proof-image></a><figcaption>${escapeHtml(caption)} ↗</figcaption></figure>`;
+}
+
+function imageInputMarkup(name, label, description) {
+  return `<div class="image-input-card" data-image-input><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(description)}</small></div><label class="file-button">Choose photo<input type="file" accept="image/*" data-image-file></label><label>IPFS CID or image URL<input name="${escapeHtml(name)}" type="text" placeholder="bafy… or https://…" data-image-cid></label><figure class="image-preview hidden" data-image-preview-wrap><img alt="${escapeHtml(label)} preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure></div>`;
+}
+
+function updateImagePreview(input) {
+  const card = input.closest("[data-image-input]");
+  if (!card) return;
+  const preview = $("[data-image-preview]", card); const wrap = $("[data-image-preview-wrap]", card); const caption = $("[data-image-caption]", card);
+  if (input.matches("[data-image-file]")) {
+    const file = input.files?.[0];
+    if (!file) return;
+    preview.src = URL.createObjectURL(file); wrap.classList.remove("hidden");
+    caption.textContent = `${file.name} — local preview only; enter a CID or URL before submitting.`;
+    return;
+  }
+  const url = imageUrl(input.value);
+  if (!url) { wrap.classList.add("hidden"); preview.removeAttribute("src"); return; }
+  preview.src = url; wrap.classList.remove("hidden"); caption.textContent = "This CID or URL will be saved on-chain.";
 }
 
 function milestoneButtons(agreement, milestone) {
@@ -695,19 +732,19 @@ function renderAgreementDetail(agreement) {
         <div class="detail-stat"><span>Current escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div>
         <div class="detail-stat"><span>Deadline</span><strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong></div>
       </div>
-      ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div>${details.photoCID ? `<div><span>Parcel photo</span><strong>${cidLink(details.photoCID)}</strong></div>` : ""}</div>` : ""}
+      ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div></div>${details.photoCID ? `<div class="proof-gallery"><div><span class="section-label">Parcel photo</span>${imageProof(details.photoCID, `Parcel for agreement ${agreement.id}`, "View parcel photo")}</div></div>` : ""}` : ""}
       ${agreement.status === 5 ? `<div class="evidence-card"><span class="section-label">Dispute reason</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
       <div class="detail-section-title"><h3>Milestone progress</h3><span>${complete} of ${agreement.milestones.length} verified</span></div>
       <div class="milestone-stepper">${agreement.milestones.map(milestone => `
         <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
           <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
-          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}</p></div>
+          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}</p>${milestone.proofCID ? imageProof(milestone.proofCID, `${milestoneName(milestone)} delivery proof`, "View milestone photo") : ""}</div>
           <span class="milestone-payout">${milestone.percentage}%</span>
           <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
         </div>`).join("")}</div>
       <div class="detail-section-title"><h3>Chronological history</h3><span>Newest first</span></div>
       <div class="timeline">${events.length ? events.map(event => `<div class="timeline-event"><strong>${escapeHtml(event.title)}</strong><span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span></div>`).join("") : `<div class="timeline-event"><strong>No milestone activity yet</strong><span>Reports and verifications will appear here.</span></div>`}</div>
-      ${agreement.status === 5 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small></article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>Participants can attach a description and optional IPFS CID.</div>`}</div>` : ""}
+      ${agreement.status === 5 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>Participants can attach a description and optional IPFS CID.</div>`}</div>` : ""}
       <div class="detail-actions">
         ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
         ${canDispute ? `<button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>` : ""}
@@ -729,17 +766,17 @@ function openActionDialog(action, milestoneIndex = null) {
   submit.textContent = "Confirm";
   if (action === "report") {
     title.textContent = "Report milestone";
-    description.textContent = "This records completion for the shipper to verify. An IPFS proof CID is optional.";
-    fields.innerHTML = `<label>Proof CID (optional)<input name="proofCID" type="text" placeholder="bafy…"></label>`;
+    description.textContent = "Record delivery progress and optionally attach a proof photo. The contract stores its CID or URL.";
+    fields.innerHTML = imageInputMarkup("proofCID", "Milestone delivery photo (optional)", "Photograph the parcel, checkpoint, receiver, or delivery document.");
     submit.textContent = "Report on-chain";
   } else if (action === "dispute") {
     title.textContent = "Raise a dispute";
-    description.textContent = "Raising a dispute freezes payouts and refunds until the arbitrator resolves it.";
-    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label>`;
+    description.textContent = "Raising a dispute freezes payouts. Optional evidence is submitted in a second wallet transaction after the dispute opens.";
+    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Add an IPFS CID or image URL. A description is required when evidence is attached.")}`;
   } else if (action === "evidence") {
     title.textContent = "Submit dispute evidence";
     description.textContent = "Evidence is permanently associated with this disputed agreement.";
-    fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label><label>File CID (optional)<input name="fileCID" type="text" placeholder="IPFS CID"></label>`;
+    fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label>${imageInputMarkup("fileCID", "Evidence photo or document (optional)", "Enter the uploaded file's IPFS CID or a public URL to save it on-chain.")}`;
     submit.textContent = "Submit evidence";
   }
   $("#actionDialog").showModal();
@@ -763,6 +800,9 @@ async function submitAction(event) {
   event.preventDefault();
   const data = new FormData(event.target);
   const { action, agreementId, milestoneIndex } = state.pendingAction || {};
+  const localPhoto = $("[data-image-file]", $("#actionFields"));
+  const storedPhoto = $("[data-image-cid]", $("#actionFields"));
+  if (localPhoto?.files?.length && !storedPhoto?.value.trim()) return showToast("The selected photo is only a local preview. Upload it to IPFS and enter its CID or image URL before submitting.", "error");
   if (state.demo) {
     $("#actionDialog").close();
     return showToast("Transactions are disabled in preview mode.", "error");
@@ -772,8 +812,12 @@ async function submitAction(event) {
     if (action === "dispute") {
       const reason = Number(data.get("reason"));
       const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
+      const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
+      const evidenceCID = String(data.get("evidenceCID") || "").trim();
       if (reason === 5 && !otherReason) return showToast("Enter the other dispute reason.", "error");
+      if (evidenceCID && !evidenceDescription) return showToast("Describe what the dispute evidence photo shows.", "error");
       await sendTransaction(state.contract.methods.raiseDispute(agreementId, reason, otherReason), {}, "Raise dispute");
+      if (evidenceDescription) await sendTransaction(state.contract.methods.submitEvidence(agreementId, evidenceDescription, evidenceCID), {}, "Submit dispute evidence");
     }
     if (action === "evidence") {
       const description = String(data.get("description") || "").trim();
@@ -928,7 +972,15 @@ function bindEvents() {
   $("#actionForm").addEventListener("submit", submitAction);
   $("#actionFields").addEventListener("change", event => {
     if (event.target.name === "reason") $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
+    if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
   });
+  document.addEventListener("input", event => { if (event.target.matches("[data-image-cid]")) updateImagePreview(event.target); });
+  document.addEventListener("change", event => { if (event.target.matches("[data-image-file]")) updateImagePreview(event.target); });
+  document.addEventListener("error", event => {
+    if (!event.target.matches?.("[data-proof-image]") || event.target.dataset.fallback) return;
+    event.target.dataset.fallback = "1";
+    event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
+  }, true);
   [$("#agreementDialog"), $("#actionDialog")].forEach(dialog => dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); }));
 }
 

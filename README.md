@@ -81,6 +81,7 @@ The UI reads the active deployment from `build/contracts/Escrow.json`. If the co
 - Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
 - Month and exact-date agreement filters, plus active agreements ordered by nearest deadline
 - Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
+- Optional parcel, milestone-delivery, and dispute-evidence photos with local preview and IPFS CID/public-URL storage
 - Refund, dispute, evidence, and arbitrator resolution controls
 - Chronological milestone report/verification history and recent on-chain account activity
 - Editable display names, carrier service profiles, and ReputationToken point/star display
@@ -121,4 +122,5 @@ git push origin your-branch-name
 - Milestone completion is self-reported by the Carrier and verified by the Shipper; there is no external IoT/GPS/oracle integration to confirm real-world delivery.
 - Dispute resolution authority (who may call `resolveDispute()`) is documented in the Design Document.
 - Reputation tokens are reward-only in the current scope; a penalty mechanism is sketched as an optional future enhancement.
+- Local image selection is a preview only. The contracts store a CID/URL string rather than image bytes, so production use still needs an IPFS uploader or another file-storage service.
 - The current `Escrow.sol` ABI does not yet expose the proposed carrier accept/reject workflow, deadline extension, admin commission withdrawal, or adjustable reward settings. The frontend reports this capability gap and does not show transaction controls that would revert or call missing methods.
