@@ -5,6 +5,11 @@ const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
 const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
+const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
+const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
+const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
+const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day", "Scheduled"];
+const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
 const ACTIVE_STATUSES = [1, 2];
 const CLOSED_STATUSES = [3, 4];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -13,15 +18,22 @@ const state = {
   web3: null,
   contract: null,
   artifact: null,
+  tokenArtifact: null,
+  token: null,
   account: null,
   chainId: null,
   role: ROLE.NONE,
   isArbitrator: false,
   agreements: [],
   carriers: [],
+  activity: [],
+  displayName: "",
+  reputation: "0",
   currentAgreementId: null,
   pendingAction: null,
   filter: "all",
+  monthFilter: "",
+  dateFilter: "",
   demo: new URLSearchParams(location.search).get("demo") === "1"
 };
 
@@ -197,6 +209,14 @@ async function initializeContract(manualAddress = null) {
       return;
     }
     state.contract = new state.web3.eth.Contract(state.artifact.abi, address);
+    try {
+      if (!state.tokenArtifact) {
+        const tokenResponse = await fetch("/contracts/ReputationToken.json", { cache: "no-store" });
+        if (tokenResponse.ok) state.tokenArtifact = await tokenResponse.json();
+      }
+      const tokenAddress = await state.contract.methods.reputationToken().call();
+      if (state.tokenArtifact?.abi && tokenAddress !== ZERO_ADDRESS) state.token = new state.web3.eth.Contract(state.tokenArtifact.abi, tokenAddress);
+    } catch (_) { state.token = null; }
     localStorage.setItem(`escrowAddress:${state.chainId}`, address);
     $("#contractAddressShort").textContent = shortAddress(address, 8, 6);
     await routeConnectedUser();
@@ -235,6 +255,7 @@ function configureDashboardForRole() {
   const isShipper = state.role === ROLE.SHIPPER;
   const isArbitrator = state.role === ROLE.ARBITRATOR;
   $$(".shipper-only").forEach(node => node.classList.toggle("role-hidden", !isShipper));
+  $$(".carrier-only").forEach(node => node.classList.toggle("role-hidden", state.role !== ROLE.CARRIER));
   $$(".arbitrator-only").forEach(node => node.classList.toggle("role-hidden", !isArbitrator));
   $("#profileRole").textContent = roleLabel(state.role);
   $("#profileAddress").textContent = shortAddress(state.account, 8, 6);
@@ -250,7 +271,7 @@ function configureDashboardForRole() {
 async function refreshAll() {
   if (!state.contract && !state.demo) return;
   try {
-    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements()]);
+    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements(), refreshProfile(), refreshActivity()]);
     renderDashboard();
     if (state.currentAgreementId !== null && $("#agreementDialog").open) await openAgreement(state.currentAgreementId, false);
   } catch (error) {
@@ -271,10 +292,55 @@ async function refreshCarriers() {
   if (state.demo) return;
   const addresses = await state.contract.methods.getAllCarriers().call();
   state.carriers = await Promise.all(addresses.map(async address => {
-    let name = "";
+    let name = ""; let profile = { location: 0, deliveryTypes: 0, isSet: false }; let reputation = "0";
     try { name = await state.contract.methods.displayName(address).call(); } catch (_) { /* optional label */ }
-    return { address, name: name || "Registered carrier" };
+    try {
+      const rawProfile = await state.contract.methods.getCarrierProfile(address).call();
+      profile = { location: Number(valueAt(rawProfile, "location", 0)), deliveryTypes: Number(valueAt(rawProfile, "deliveryTypes", 1)), isSet: Boolean(valueAt(rawProfile, "isSet", 2)) };
+    } catch (_) { /* profile was added in the latest contract */ }
+    try { if (state.token) reputation = await state.token.methods.balanceOf(address).call(); } catch (_) { /* optional reputation display */ }
+    return { address, name: name || "Registered carrier", profile, reputation };
   }));
+}
+
+async function refreshProfile() {
+  if (state.demo) return;
+  try { state.displayName = await state.contract.methods.displayName(state.account).call(); } catch (_) { state.displayName = ""; }
+  try { state.reputation = state.token ? await state.token.methods.balanceOf(state.account).call() : "0"; } catch (_) { state.reputation = "0"; }
+  $("#displayNameInput").value = state.displayName || "";
+  const points = Number(state.reputation || 0);
+  const stars = Math.min(5, Math.floor(points / 100));
+  $("#reputationStars").textContent = `${"★".repeat(stars)}${"☆".repeat(5 - stars)}`;
+  $("#reputationPoints").textContent = `${points.toLocaleString()} point${points === 1 ? "" : "s"}`;
+  if (state.role === ROLE.CARRIER) {
+    try {
+      const profile = await state.contract.methods.getCarrierProfile(state.account).call();
+      $("#profileLocation").value = String(Number(valueAt(profile, "location", 0)) || 1);
+      const mask = Number(valueAt(profile, "deliveryTypes", 1));
+      $$('[name="deliveryType"]').forEach(input => { input.checked = Boolean(mask & Number(input.value)); });
+    } catch (_) { /* keep defaults */ }
+  }
+  renderCapabilityNotice();
+}
+
+function supportsMethod(name) {
+  return Boolean(state.artifact?.abi?.some(item => item.type === "function" && item.name === name));
+}
+
+function renderCapabilityNotice() {
+  const missing = ["acceptAgreement", "rejectAgreement", "extendDeadline", "withdrawCommission", "setRewardAmount"].filter(name => !supportsMethod(name));
+  $("#backendCapabilityText").textContent = missing.length
+    ? `This deployment supports shipment details, carrier profiles, reputation and disputes. Acceptance, rejection, deadline extension, commission withdrawal and reward settings require the planned Solidity update.`
+    : "All planned frontend integration methods are present in this deployment.";
+}
+
+async function refreshActivity() {
+  if (state.demo) return;
+  try {
+    const events = await state.contract.getPastEvents("allEvents", { fromBlock: 0, toBlock: "latest" });
+    const account = state.account.toLowerCase();
+    state.activity = events.filter(event => Object.values(event.returnValues || {}).some(value => typeof value === "string" && value.toLowerCase() === account)).slice(-12).reverse();
+  } catch (_) { state.activity = []; }
 }
 
 async function agreementIdsForCurrentUser() {
@@ -298,6 +364,15 @@ async function loadAgreement(id, includeEvidence = false) {
     evidence: []
   };
   const milestoneCount = Number(await state.contract.methods.getMilestoneCount(id).call());
+  try {
+    const details = await state.contract.methods.getAgreementDetails(id).call();
+    agreement.details = {
+      origin: Number(valueAt(details, "origin", 0)), destination: Number(valueAt(details, "destination", 1)),
+      itemType: Number(valueAt(details, "itemType", 2)), size: Number(valueAt(details, "size", 3)),
+      weight: valueAt(details, "weight", 4), deliverySpeed: Number(valueAt(details, "deliverySpeed", 5)),
+      guaranteeTier: Number(valueAt(details, "guaranteeTier", 6)), photoCID: valueAt(details, "photoCID", 7)
+    };
+  } catch (_) { agreement.details = null; }
   agreement.milestones = await Promise.all(Array.from({ length: milestoneCount }, async (_, index) => {
     const milestone = await state.contract.methods.getMilestone(id, index).call();
     return {
@@ -312,13 +387,13 @@ async function loadAgreement(id, includeEvidence = false) {
       proofCID: valueAt(milestone, "proofCID", 7)
     };
   }));
-  if (includeEvidence && agreement.status === 5) {
-    const [reasonResult, evidenceCount] = await Promise.all([
-      state.contract.methods.getDisputeReason(id).call(),
-      state.contract.methods.getEvidenceCount(id).call()
-    ]);
+  try {
+    const reasonResult = await state.contract.methods.getDisputeReason(id).call();
     agreement.disputeReason = Number(valueAt(reasonResult, "reason", 0));
     agreement.disputeOtherReason = valueAt(reasonResult, "otherReason", 1);
+  } catch (_) { agreement.disputeReason = 0; agreement.disputeOtherReason = ""; }
+  if (includeEvidence && agreement.status === 5) {
+    const evidenceCount = await state.contract.methods.getEvidenceCount(id).call();
     agreement.evidence = await Promise.all(Array.from({ length: Number(evidenceCount) }, async (_, index) => {
       const evidence = await state.contract.methods.getEvidence(id, index).call();
       return {
@@ -336,7 +411,7 @@ async function refreshAgreements() {
   if (state.demo) return;
   const ids = await agreementIdsForCurrentUser();
   const all = await Promise.all([...ids].reverse().map(id => loadAgreement(id)));
-  state.agreements = state.role === ROLE.ARBITRATOR ? all.filter(item => item.status === 5) : all;
+  state.agreements = state.role === ROLE.ARBITRATOR ? all.filter(item => item.disputeReason > 0 || item.status === 5) : all;
 }
 
 function escrowRemaining(agreement) {
@@ -370,6 +445,7 @@ function renderDashboard() {
   renderRecentAgreements();
   renderAgreementGrid();
   renderCarriers();
+  renderActivity();
   updateCountdowns();
 }
 
@@ -397,15 +473,30 @@ function renderRecentAgreements() {
 }
 
 function agreementMatchesFilter(agreement) {
-  if (state.filter === "active") return ACTIVE_STATUSES.includes(agreement.status);
-  if (state.filter === "attention") return needsAttention(agreement);
-  if (state.filter === "closed") return CLOSED_STATUSES.includes(agreement.status);
+  let matchesStatus = true;
+  if (state.role === ROLE.ARBITRATOR) {
+    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 5;
+    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 5;
+  } else {
+    if (state.filter === "active") matchesStatus = ACTIVE_STATUSES.includes(agreement.status);
+    if (state.filter === "attention") matchesStatus = needsAttention(agreement);
+    if (state.filter === "closed") matchesStatus = CLOSED_STATUSES.includes(agreement.status);
+  }
+  if (!matchesStatus) return false;
+  const date = new Date(agreement.deadline * 1000);
+  const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  if (state.monthFilter && !localDate.startsWith(state.monthFilter)) return false;
+  if (state.dateFilter && localDate !== state.dateFilter) return false;
   return true;
 }
 
 function renderAgreementGrid() {
   const container = $("#agreementGrid");
-  const agreements = state.agreements.filter(agreementMatchesFilter);
+  const agreements = state.agreements.filter(agreementMatchesFilter).sort((a, b) => {
+    const activeA = ACTIVE_STATUSES.includes(a.status); const activeB = ACTIVE_STATUSES.includes(b.status);
+    if (activeA !== activeB) return activeA ? -1 : 1;
+    return activeA ? a.deadline - b.deadline : b.id - a.id;
+  });
   if (!agreements.length) {
     container.innerHTML = `<div class="empty-state"><strong>Nothing to show</strong>No agreements match this filter.</div>`;
     return;
@@ -416,7 +507,7 @@ function renderAgreementGrid() {
     const progress = total ? Math.round(complete / total * 100) : 0;
     const party = counterpart(agreement);
     return `<article class="agreement-card" data-agreement-id="${agreement.id}" tabindex="0">
-      <div class="agreement-card-top"><div><span class="section-label">${party.label}: ${shortAddress(party.address)}</span><h3>Agreement #${agreement.id}</h3><p>Deadline ${formatDate(agreement.deadline)}</p></div>${statusPill(agreement.status)}</div>
+      <div class="agreement-card-top"><div><span class="section-label">${party.label}: ${shortAddress(party.address)}</span><h3>Agreement #${agreement.id}</h3><p>${agreement.details ? `${escapeHtml(LOCATIONS[agreement.details.origin])} → ${escapeHtml(LOCATIONS[agreement.details.destination])} · ${escapeHtml(ITEM_TYPES[agreement.details.itemType])}` : "Shipment details unavailable"}</p><p>Deadline ${formatDate(agreement.deadline)}</p></div>${statusPill(agreement.status)}</div>
       <div class="agreement-finance"><div><span>Total</span><strong>${formatEth(agreement.totalValue)}</strong></div><div><span>Released</span><strong>${formatEth(agreement.releasedAmount)}</strong></div><div><span>In escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div></div>
       <div class="progress-track"><i style="width:${progress}%"></i></div>
       <div class="agreement-progress-labels"><span>${complete} of ${total} verified</span><span class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</span></div>
@@ -427,14 +518,51 @@ function renderAgreementGrid() {
 function renderCarriers() {
   const quick = $("#carrierQuickList");
   const picker = $("#carrierPicker");
-  if (!quick || !picker) return;
+  const marketplace = $("#carrierMarketplace");
+  if (!quick || !picker || !marketplace) return;
   if (!state.carriers.length) {
     quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
     picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
+    marketplace.innerHTML = picker.innerHTML;
     return;
   }
-  quick.innerHTML = state.carriers.slice(0, 4).map(carrier => `<button class="carrier-quick" type="button" data-select-carrier="${carrier.address}"><span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 9, 6)}</small></div></button>`).join("");
-  picker.innerHTML = state.carriers.map(carrier => `<button class="carrier-card" type="button" data-select-carrier="${carrier.address}"><span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 10, 6)}</small></div></button>`).join("");
+  quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
+  picker.innerHTML = matchingCarriersForForm().map(carrier => carrierCard(carrier, true)).join("") || `<div class="empty-state"><strong>No route match</strong>Adjust the shipment origin or delivery speed.</div>`;
+  renderMarketplace();
+}
+
+function reputationLabel(points) {
+  const score = Number(points || 0); const stars = Math.min(5, Math.floor(score / 100));
+  return `${stars ? "★".repeat(stars) : "New"} · ${score} pts`;
+}
+
+function deliveryLabels(mask) {
+  return [[1, "Standard"], [2, "Express"], [4, "Same day"]].filter(([bit]) => Number(mask) & bit).map(([, label]) => label).join(", ") || "Profile not set";
+}
+
+function carrierCardSmall(carrier) {
+  return `<button class="carrier-quick" type="button" data-select-carrier="${carrier.address}"><span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 9, 6)} · ${escapeHtml(reputationLabel(carrier.reputation))}</small></div></button>`;
+}
+
+function carrierCard(carrier, selectOnly = false) {
+  return `<article class="carrier-card marketplace-card ${selectOnly ? "selectable" : ""}" ${selectOnly ? `data-select-carrier="${carrier.address}" tabindex="0"` : ""}><span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 10, 6)}</small><p>${carrier.profile?.isSet ? escapeHtml(LOCATIONS[carrier.profile.location]) : "Location not set"} · ${escapeHtml(deliveryLabels(carrier.profile?.deliveryTypes))}</p><span class="rating">${escapeHtml(reputationLabel(carrier.reputation))}</span></div>${selectOnly ? `<button class="button button-secondary" type="button" data-select-carrier="${carrier.address}">Select</button>` : `<button class="button button-primary" type="button" data-select-carrier="${carrier.address}">Create agreement</button>`}</article>`;
+}
+
+function matchingCarriersForForm() {
+  const origin = Number($("#origin")?.value || 0); const speed = Number($("#deliverySpeed")?.value || 0); const bit = speed <= 3 ? 2 ** (speed - 1) : 0;
+  return state.carriers.filter(carrier => !carrier.profile?.isSet || ((!origin || carrier.profile.location === origin) && (!bit || (carrier.profile.deliveryTypes & bit))));
+}
+
+function renderMarketplace() {
+  const query = ($("#carrierSearch")?.value || "").trim().toLowerCase(); const locationValue = Number($("#carrierLocationFilter")?.value || 0); const speed = Number($("#carrierSpeedFilter")?.value || 0);
+  let carriers = state.carriers.filter(carrier => (!query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)) && (!locationValue || carrier.profile?.location === locationValue) && (!speed || (carrier.profile?.deliveryTypes & speed)));
+  carriers.sort((a, b) => $("#carrierSort")?.value === "reputation" ? Number(b.reputation) - Number(a.reputation) : a.name.localeCompare(b.name));
+  $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Try removing one of the marketplace filters.</div>`;
+}
+
+function renderActivity() {
+  const labels = { AgreementCreated: "Agreement created", AgreementFunded: "Escrow funded", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
+  $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>Block ${event.blockNumber} · transaction ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent account events</strong>New on-chain activity will appear here.</div>`;
 }
 
 function selectCarrier(address) {
@@ -468,6 +596,21 @@ function updatePercentageTotal() {
   badge.classList.toggle("invalid", total > 100);
 }
 
+function suggestedPrice() {
+  const origin = Number($("#origin").value || 1); const destination = Number($("#destination").value || 1);
+  const size = Number($("#parcelSize").value || 1); const weight = Number($("#weight").value || 1);
+  const speed = Number($("#deliverySpeed").value || 1); const tier = Number($("#guaranteeTier").value || 1);
+  const routeFactor = 1 + Math.min(8, Math.abs(origin - destination)) * 0.12;
+  const estimate = (0.003 + size * 0.002 + weight * 0.00045) * routeFactor * [0, 1, 1.45, 1.9, 1.25][speed] * [0, 1, 1.2, 1.45][tier];
+  return Math.max(0.001, estimate);
+}
+
+function updatePriceSuggestion(fillIfEmpty = false) {
+  const estimate = suggestedPrice().toFixed(6);
+  $("#priceSuggestion").textContent = `Suggested ${estimate} ETH — editable; this estimate is calculated in the browser and is not a fixed on-chain price.`;
+  if (fillIfEmpty && !$("#totalValue").value) $("#totalValue").value = estimate;
+}
+
 async function createAgreement(event) {
   event.preventDefault();
   if (state.demo) return showToast("Creation is disabled in preview mode.", "error");
@@ -478,14 +621,18 @@ async function createAgreement(event) {
   const types = rows.map(row => Number($(".milestone-type", row).value));
   const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
   const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
+  const details = [Number($("#origin").value), Number($("#destination").value), Number($("#itemType").value), Number($("#parcelSize").value), String(Math.round(Number($("#weight").value) * 1000)), Number($("#deliverySpeed").value), Number($("#guaranteeTier").value), $("#photoCID").value.trim()];
   if (!carrier) return showToast("Select a registered carrier.", "error");
   if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
   if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
   if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
   if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
+  if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
+  if (details[0] === details[1]) return showToast("Origin and destination must be different.", "error");
+  if (Number(details[4]) <= 0) return showToast("Weight must be greater than zero.", "error");
   const totalValue = state.web3.utils.toWei(ethValue, "ether");
   try {
-    const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages), {}, "Create agreement");
+    const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
     if (!receipt) return;
     const createdEvent = receipt.events?.AgreementCreated;
     const agreementId = Number(createdEvent?.returnValues?.agreementId ?? createdEvent?.returnValues?.[0] ?? (await state.contract.methods.agreementCount().call()) - 1);
@@ -495,6 +642,8 @@ async function createAgreement(event) {
     $("#milestoneRows").innerHTML = "";
     addMilestoneRow(1, 30);
     addMilestoneRow(5, 70);
+    setDefaultDeadline();
+    updatePriceSuggestion(true);
     showSection("agreementsSection");
   } catch (_) { /* sendTransaction already reports the reason */ }
 }
@@ -514,7 +663,6 @@ function milestoneName(milestone) {
 
 function cidLink(cid) {
   if (!cid) return "";
-  const safe = escapeHtml(cid);
   return `<a href="https://ipfs.io/ipfs/${encodeURIComponent(cid)}" target="_blank" rel="noopener">View IPFS proof ↗</a>`;
 }
 
@@ -541,6 +689,7 @@ function renderAgreementDetail(agreement) {
   const canRefund = ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
   const isParticipant = [agreement.shipper, agreement.carrier].some(address => address.toLowerCase() === state.account.toLowerCase());
   const disputeReason = agreement.status === 5 ? (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : "";
+  const details = agreement.details;
   $("#agreementDetail").innerHTML = `
     <div class="detail-head"><span class="section-label">On-chain agreement</span><div class="detail-title-row"><div><h2>Agreement #${agreement.id}</h2><p>${shortAddress(agreement.shipper, 9, 6)} → ${shortAddress(agreement.carrier, 9, 6)}</p></div>${statusPill(agreement.status)}</div></div>
     <div class="detail-body">
@@ -550,6 +699,7 @@ function renderAgreementDetail(agreement) {
         <div class="detail-stat"><span>Current escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div>
         <div class="detail-stat"><span>Deadline</span><strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong></div>
       </div>
+      ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div>${details.photoCID ? `<div><span>Parcel photo</span><strong>${cidLink(details.photoCID)}</strong></div>` : ""}</div>` : ""}
       ${agreement.status === 5 ? `<div class="evidence-card"><span class="section-label">Dispute reason</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
       <div class="detail-section-title"><h3>Milestone progress</h3><span>${complete} of ${agreement.milestones.length} verified</span></div>
       <div class="milestone-stepper">${agreement.milestones.map(milestone => `
@@ -654,33 +804,35 @@ function seedDemo() {
   state.role = ROLE.SHIPPER;
   state.isArbitrator = false;
   state.carriers = [
-    { address: "0xA4413B7bd46e682feA6aF4339eD1fc6CC940Ab81", name: "Northstar Logistics" },
-    { address: "0x2C990F64c3eF79724D7Dc179f8EA7CcB402CB261", name: "Meridian Freight" },
-    { address: "0x6B86E1a3D577Fd859b7c554734dd45aE347A7C90", name: "GreenRoute Carrier" }
+    { address: "0xA4413B7bd46e682feA6aF4339eD1fc6CC940Ab81", name: "Northstar Logistics", profile: { location: 12, deliveryTypes: 7, isSet: true }, reputation: "500" },
+    { address: "0x2C990F64c3eF79724D7Dc179f8EA7CcB402CB261", name: "Meridian Freight", profile: { location: 14, deliveryTypes: 3, isSet: true }, reputation: "300" },
+    { address: "0x6B86E1a3D577Fd859b7c554734dd45aE347A7C90", name: "GreenRoute Carrier", profile: { location: 7, deliveryTypes: 1, isSet: true }, reputation: "100" }
   ];
   state.agreements = [
-    { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 2, milestones: [
+    { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 2, details: { origin: 12, destination: 14, itemType: 2, size: 2, weight: 3500, deliverySpeed: 2, guaranteeTier: 2, photoCID: "bafycargo1042" }, milestones: [
       { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000, proofCID: "bafybeipickup1042" },
       { index: 1, type: 3, description: "", percentage: 30, reported: true, completed: false, reportedTimestamp: now - 3600, completedTimestamp: 0, proofCID: "bafybeitransit1042" },
       { index: 2, type: 5, description: "", percentage: 40, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
     ]},
-    { id: 3, shipper: state.account, carrier: state.carriers[1].address, totalValue: 2.25, fundedAmount: 2.25, releasedAmount: 0, deadline: now + 36000, status: 5, disputeReason: 2, disputeOtherReason: "", evidence: [
+    { id: 3, shipper: state.account, carrier: state.carriers[1].address, totalValue: 2.25, fundedAmount: 2.25, releasedAmount: 0, deadline: now + 36000, status: 5, details: { origin: 14, destination: 7, itemType: 5, size: 3, weight: 8200, deliverySpeed: 1, guaranteeTier: 3, photoCID: "" }, disputeReason: 2, disputeOtherReason: "", evidence: [
       { submittedBy: state.account, description: "The attached image does not match the sealed cargo ID.", fileCID: "bafybaddocument", timestamp: now - 8200 }
     ], milestones: [
       { index: 0, type: 1, description: "", percentage: 40, reported: true, completed: false, reportedTimestamp: now - 12000, completedTimestamp: 0, proofCID: "bafyproofshipment" },
       { index: 1, type: 5, description: "", percentage: 60, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
     ]},
-    { id: 1, shipper: state.account, carrier: state.carriers[2].address, totalValue: 1.6, fundedAmount: 1.6, releasedAmount: 1.6, deadline: now - 604800, status: 3, milestones: [
+    { id: 1, shipper: state.account, carrier: state.carriers[2].address, totalValue: 1.6, fundedAmount: 1.6, releasedAmount: 1.6, deadline: now - 604800, status: 3, details: { origin: 7, destination: 12, itemType: 1, size: 1, weight: 900, deliverySpeed: 1, guaranteeTier: 1, photoCID: "" }, milestones: [
       { index: 0, type: 1, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 900000, completedTimestamp: now - 899000, proofCID: "" },
       { index: 1, type: 3, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 800000, completedTimestamp: now - 799000, proofCID: "" },
       { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000, proofCID: "bafyfinaldelivery" }
     ]}
   ];
+  state.activity = [{ event: "MilestoneReported", blockNumber: 48, transactionHash: "0x9156f73c8798d74b37aa001734c4795ddf22" }, { event: "AgreementFunded", blockNumber: 41, transactionHash: "0x20d62eaba4aa321a5998d938726c152d8b31" }];
   updateWalletHeader();
   showView("dashboardView");
   configureDashboardForRole();
   $("#contractAddressShort").textContent = "Preview data";
   $("#walletBalance").textContent = "12.46 ETH";
+  renderCapabilityNotice();
   renderDashboard();
 }
 
@@ -688,6 +840,32 @@ function setDefaultDeadline() {
   const date = new Date(Date.now() + 3 * 86400000);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   $("#deadline").value = date.toISOString().slice(0, 16);
+}
+
+function populateLocationSelects() {
+  const options = LOCATIONS.slice(1).map((label, index) => `<option value="${index + 1}">${escapeHtml(label)}</option>`).join("");
+  $("#origin").innerHTML = options;
+  $("#destination").innerHTML = options;
+  $("#origin").value = "12";
+  $("#destination").value = "14";
+  $("#profileLocation").innerHTML = options;
+  $("#carrierLocationFilter").insertAdjacentHTML("beforeend", options);
+}
+
+async function saveDisplayName(event) {
+  event.preventDefault();
+  const name = $("#displayNameInput").value.trim();
+  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  try { await sendTransaction(state.contract.methods.setDisplayName(name), {}, "Update display name"); } catch (_) { /* surfaced */ }
+}
+
+async function saveCarrierProfile(event) {
+  event.preventDefault();
+  const locationValue = Number($("#profileLocation").value);
+  const mask = $$('[name="deliveryType"]:checked').reduce((sum, input) => sum + Number(input.value), 0);
+  if (!mask) return showToast("Select at least one delivery type.", "error");
+  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  try { await sendTransaction(state.contract.methods.setCarrierProfile(locationValue, mask), {}, "Update carrier profile"); } catch (_) { /* surfaced */ }
 }
 
 function bindEvents() {
@@ -703,6 +881,16 @@ function bindEvents() {
   });
   $$('[data-register-role]').forEach(button => button.addEventListener("click", () => registerRole(button.dataset.registerRole)));
   $("#agreementForm").addEventListener("submit", createAgreement);
+  $("#displayNameForm").addEventListener("submit", saveDisplayName);
+  $("#carrierProfileForm").addEventListener("submit", saveCarrierProfile);
+  ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace));
+  $("#agreementMonth").addEventListener("change", event => { state.monthFilter = event.target.value; renderAgreementGrid(); });
+  $("#agreementDate").addEventListener("change", event => { state.dateFilter = event.target.value; renderAgreementGrid(); });
+  $("#clearDateFilters").addEventListener("click", () => { state.monthFilter = state.dateFilter = ""; $("#agreementMonth").value = $("#agreementDate").value = ""; renderAgreementGrid(); });
+  ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
+    $("#" + id).addEventListener("input", () => { updatePriceSuggestion(false); renderCarriers(); });
+    $("#" + id).addEventListener("change", () => { updatePriceSuggestion(false); renderCarriers(); });
+  });
   $("#addMilestoneButton").addEventListener("click", () => addMilestoneRow());
   $("#milestoneRows").addEventListener("input", updatePercentageTotal);
   $("#milestoneRows").addEventListener("change", event => {
@@ -750,7 +938,9 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  populateLocationSelects();
   setDefaultDeadline();
+  updatePriceSuggestion(true);
   addMilestoneRow(1, 30);
   addMilestoneRow(5, 70);
   setInterval(updateCountdowns, 30000);
