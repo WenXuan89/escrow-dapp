@@ -13,6 +13,7 @@ const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
 const ACTIVE_STATUSES = [1, 2];
 const OPEN_STATUSES = [0, 1, 2, 6];
 const CLOSED_STATUSES = [3, 4, 7];
+const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const state = {
@@ -53,6 +54,95 @@ const shortAddress = (address, head = 6, tail = 4) => address ? `${address.slice
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
+
+function deadlineLocalDate(deadline) {
+  const timestamp = Number(deadline);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  const date = new Date(timestamp * 1000);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function validMonth(value) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : "";
+}
+
+function validDate(value) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(value)) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  const candidate = new Date(year, month - 1, day);
+  return candidate.getFullYear() === year && candidate.getMonth() === month - 1 && candidate.getDate() === day ? value : "";
+}
+
+function updateAgreementDateBounds() {
+  const dateInput = $("#agreementDate");
+  if (!dateInput) return;
+  if (!state.monthFilter) {
+    dateInput.removeAttribute("min");
+    dateInput.removeAttribute("max");
+    return;
+  }
+  const [year, month] = state.monthFilter.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  dateInput.min = `${state.monthFilter}-01`;
+  dateInput.max = `${state.monthFilter}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function resetAgreementDateFilters(render = false) {
+  state.monthFilter = "";
+  state.dateFilter = "";
+  if ($("#agreementMonth")) $("#agreementMonth").value = "";
+  if ($("#agreementDate")) $("#agreementDate").value = "";
+  updateAgreementDateBounds();
+  if (render) renderAgreementGrid();
+}
+
+function setAgreementMonthFilter(value) {
+  state.monthFilter = validMonth(value);
+  if (state.dateFilter && !state.dateFilter.startsWith(`${state.monthFilter}-`)) {
+    state.dateFilter = "";
+    $("#agreementDate").value = "";
+  }
+  updateAgreementDateBounds();
+  renderAgreementGrid();
+}
+
+function setAgreementDateFilter(value) {
+  state.dateFilter = validDate(value);
+  if (state.dateFilter) {
+    state.monthFilter = state.dateFilter.slice(0, 7);
+    $("#agreementMonth").value = state.monthFilter;
+  }
+  updateAgreementDateBounds();
+  renderAgreementGrid();
+}
+
+function setAgreementStatusFilter(filter) {
+  state.filter = ["all", "active", "attention", "closed"].includes(filter) ? filter : "all";
+  $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === state.filter));
+  renderAgreementGrid();
+  updateCountdowns();
+}
+
+function renderAgreementFilterState(resultCount) {
+  const dateFiltersEnabled = DATE_FILTER_TABS.includes(state.filter);
+  $("#agreementDateFilters")?.classList.toggle("hidden", !dateFiltersEnabled);
+  const summary = $("#agreementFilterSummary");
+  if (!summary) return;
+  const countLabel = `${resultCount} agreement${resultCount === 1 ? "" : "s"}`;
+  if (state.filter === "active") return void (summary.textContent = `${countLabel} · closest deadline first`);
+  if (state.filter === "attention") return void (summary.textContent = `${countLabel} requiring action`);
+  if (state.dateFilter) {
+    const [year, month, day] = state.dateFilter.split("-").map(Number);
+    const label = new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(new Date(year, month - 1, day));
+    return void (summary.textContent = `${countLabel} with deadline on ${label}`);
+  }
+  if (state.monthFilter) {
+    const [year, month] = state.monthFilter.split("-").map(Number);
+    const label = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+    return void (summary.textContent = `${countLabel} with deadline in ${label}`);
+  }
+  summary.textContent = state.filter === "closed" ? `${countLabel} · latest deadline first` : countLabel;
+}
 
 function formatEth(wei, precision = 4) {
   if (wei === undefined || wei === null) return "—";
@@ -280,6 +370,7 @@ function configureDashboardForRole() {
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
   state.filter = "all";
+  resetAgreementDateFilters(false);
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
 
   // Restore the participant dashboard labels whenever MetaMask changes from
@@ -563,9 +654,9 @@ function agreementMatchesFilter(agreement) {
     if (state.filter === "closed") matchesStatus = CLOSED_STATUSES.includes(agreement.status);
   }
   if (!matchesStatus) return false;
-  const date = new Date(agreement.deadline * 1000);
-  const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  if (state.monthFilter && !localDate.startsWith(state.monthFilter)) return false;
+  if (!DATE_FILTER_TABS.includes(state.filter)) return true;
+  const localDate = deadlineLocalDate(agreement.deadline);
+  if (state.monthFilter && !localDate.startsWith(`${state.monthFilter}-`)) return false;
   if (state.dateFilter && localDate !== state.dateFilter) return false;
   return true;
 }
@@ -575,8 +666,10 @@ function renderAgreementGrid() {
   const agreements = state.agreements.filter(agreementMatchesFilter).sort((a, b) => {
     const activeA = OPEN_STATUSES.includes(a.status); const activeB = OPEN_STATUSES.includes(b.status);
     if (activeA !== activeB) return activeA ? -1 : 1;
-    return activeA ? a.deadline - b.deadline : b.id - a.id;
+    if (activeA) return a.deadline - b.deadline || b.id - a.id;
+    return b.deadline - a.deadline || b.id - a.id;
   });
+  renderAgreementFilterState(agreements.length);
   if (!agreements.length) {
     container.innerHTML = `<div class="empty-state"><strong>Nothing to show</strong>No agreements match this filter.</div>`;
     return;
@@ -1105,9 +1198,9 @@ function bindEvents() {
   $("#withdrawCommissionButton").addEventListener("click", withdrawCommission);
   $("#rewardSettingsForm").addEventListener("submit", saveRewardSettings);
   ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace));
-  $("#agreementMonth").addEventListener("change", event => { state.monthFilter = event.target.value; renderAgreementGrid(); });
-  $("#agreementDate").addEventListener("change", event => { state.dateFilter = event.target.value; renderAgreementGrid(); });
-  $("#clearDateFilters").addEventListener("click", () => { state.monthFilter = state.dateFilter = ""; $("#agreementMonth").value = $("#agreementDate").value = ""; renderAgreementGrid(); });
+  $("#agreementMonth").addEventListener("change", event => setAgreementMonthFilter(event.target.value));
+  $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
+  $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
   ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
     $("#" + id).addEventListener("input", () => { updatePriceSuggestion(false); renderCarriers(); });
     $("#" + id).addEventListener("change", () => { updatePriceSuggestion(false); renderCarriers(); });
@@ -1149,12 +1242,7 @@ function bindEvents() {
     const agreement = event.target.closest("[data-agreement-id]");
     if (agreement) openAgreement(agreement.dataset.agreementId);
     const filter = event.target.closest("[data-filter]");
-    if (filter) {
-      state.filter = filter.dataset.filter;
-      $$("[data-filter]").forEach(item => item.classList.toggle("active", item === filter));
-      renderAgreementGrid();
-      updateCountdowns();
-    }
+    if (filter) setAgreementStatusFilter(filter.dataset.filter);
   });
   $("#agreementDetail").addEventListener("click", event => {
     const button = event.target.closest("[data-action]");

@@ -186,9 +186,12 @@
             <button id="activeFilterButton" class="filter-chip" type="button" data-filter="active">Active</button>
             <button id="attentionFilterButton" class="filter-chip" type="button" data-filter="attention">Needs attention</button>
             <button id="closedFilterButton" class="filter-chip" type="button" data-filter="closed">Closed</button>
-            <label class="compact-filter">Month<input id="agreementMonth" type="month"></label>
-            <label class="compact-filter">Exact date<input id="agreementDate" type="date"></label>
-            <button id="clearDateFilters" class="text-button" type="button">Clear dates</button>
+            <div id="agreementDateFilters" class="date-filter-controls" role="group" aria-label="Filter agreements by deadline">
+              <label class="compact-filter">Deadline month<input id="agreementMonth" type="month"></label>
+              <label class="compact-filter">Exact deadline<input id="agreementDate" type="date"></label>
+              <button id="clearDateFilters" class="text-button" type="button">Clear dates</button>
+            </div>
+            <span id="agreementFilterSummary" class="filter-summary" aria-live="polite"></span>
           </div>
           <div id="agreementGrid" class="agreement-grid"></div>
         </section>
