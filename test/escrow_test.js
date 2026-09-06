@@ -1249,4 +1249,3 @@ contract('Escrow + ReputationToken', (accounts) => {
     });
   });
 });
- 
