@@ -10,7 +10,7 @@
     "dev": "lite-server",
     "compile": "truffle compile",
     "migrate": "truffle migrate --reset",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "truffle test"
   },
   "repository": {
     "type": "git",
