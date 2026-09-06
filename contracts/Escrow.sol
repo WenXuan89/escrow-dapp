@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-
 import "./ReputationToken.sol";
 
 contract Escrow {
+
+    /* =================
+     * ENUMS & STRUCTS
+     * ================= */
 
     enum Role { None, Shipper, Carrier }
 
@@ -13,7 +16,9 @@ contract Escrow {
         InProgress,  // at least one milestone verified
         Completed,   // all milestones verified
         Refunded,    // deadline missed, funds returned
-        Disputed     // await resolution
+        Disputed,    // await resolution
+        Accepted,    // carrier accepted, ready to be funded
+        Rejected     // carrier declined, no funds ever moved
     }
 
     struct Milestone {
@@ -70,37 +75,55 @@ contract Escrow {
         bool isSet;
     }
 
+    /* =================
+     * STATE VARIABLES
+     * =================*/
+
     mapping(uint256 => Agreement) public agreements;
     mapping(address => Role) public userRole;
-
-    // Optional, human-friendly label a user can set for themselves (a name,
-    // company name, or handle -- doesn't have to be their real identity).
-    // Anyone can read anyone else's, so a Shipper can recognise a Carrier
-    // and vice versa, instead of only ever seeing raw wallet addresses.
     mapping(address => string) public displayName;
-
     mapping(address => uint256[]) public userAgreements;
-
     mapping(address => CarrierProfile) public carrierProfiles;
+
     address[] public carrierList;   
+    address public arbitrator;
+
     uint256 public agreementCount;
     bool private locked;
 
     ReputationToken public reputationToken;
-    address public arbitrator;
+
+    uint256 public constant COMMISSION_PERCENT = 5;
+    uint256 public arbitratorEarnings;
+    uint256 public completionReward = 100;
+    uint256 public disputeWinReward = 100;
+
+    /* =========
+     * EVENTS
+     * ========= */
 
     event UserRegistered(address indexed user, Role role);
     event DisplayNameUpdated(address indexed user, string displayName);
-    event AgreementCreated(uint256 indexed agreementId, address indexed shipper, address indexed carrier, uint256 totalValue, uint256 deadline);
+    event AgreementCreated(uint256 indexed agreementId, address indexed shipper, address indexed carrier, uint256 totalValue, uint256 deadline, string photoCID);
+    event AgreementAccepted(uint256 indexed agreementId);
+    event AgreementRejected(uint256 indexed agreementId);
     event AgreementFunded(uint256 indexed agreementId, uint256 amount);
+    event DeadlineExtended(uint256 indexed agreementId, uint256 newDeadline);
     event MilestoneReported(uint256 indexed agreementId, uint256 milestoneIndex, uint256 timestamp);
     event MilestoneVerified(uint256 indexed agreementId, uint256 milestoneIndex, uint256 payoutAmount);
     event AgreementRefunded(uint256 indexed agreementId, uint256 amount);
     event DisputeRaised(uint256 indexed agreementId, address indexed raisedBy);
     event DisputeResolved(uint256 indexed agreementId, string resolution);
     event EvidenceSubmitted(uint256 indexed agreementId, address indexed submittedBy, string fileCID);
-
+    event CommissionCollected(uint256 indexed agreementId, uint256 amount);
+    event CommissionWithdrawn(uint256 amount);
+    event ReputationRewardsUpdated(uint256 completionReward, uint256 disputeWinReward);
     event CarrierProfileUpdated(address indexed carrier, uint8 location, uint8 deliveryTypes);
+
+    /* ===========
+     * MODIFIERS
+     * ===========*/
+
     modifier onlyRegistered() {
         require(userRole[msg.sender] != Role.None, "Not registered");
         _;
@@ -149,9 +172,9 @@ contract Escrow {
         arbitrator = msg.sender; 
     }
 
-    // =================================================================
-    // Registration, Agreement Creation & Milestone Reporting
-    // =================================================================
+    /* ===================================
+     * REGISTRATION & AGREEMENT CREATION 
+     * ===================================*/
 
     function registerUser(Role role) public {
         require(role == Role.Shipper || role == Role.Carrier, "Invalid role");
@@ -274,7 +297,7 @@ contract Escrow {
 
         agreementCount++;
 
-        emit AgreementCreated(newId, msg.sender, carrier, totalValue, deadline);
+        emit AgreementCreated(newId, msg.sender, carrier, totalValue, deadline, details.photoCID);
     }
 
     function reportMilestone(uint256 agreementId, uint256 milestoneIndex, string memory proofCID)
@@ -356,7 +379,6 @@ contract Escrow {
         return userAgreements[user];
     }
 
-
     function getMilestone(uint256 agreementId, uint256 milestoneIndex) public view returns (
         uint8 milestoneType,
         string memory otherDescription,
@@ -398,11 +420,33 @@ contract Escrow {
         return agreements[agreementId].milestones.length;
     }
 
+    /* ==================
+     * FUNDING & PAYOUT 
+     * ================== */
+
+    function acceptAgreement(uint256 agreementId)
+        public
+        onlyCarrierOf(agreementId)
+        inStatus(agreementId, AgreementStatus.Created)
+    {
+        agreements[agreementId].status = AgreementStatus.Accepted;
+        emit AgreementAccepted(agreementId);
+    }
+
+    function rejectAgreement(uint256 agreementId)
+        public
+        onlyCarrierOf(agreementId)
+        inStatus(agreementId, AgreementStatus.Created)
+    {
+        agreements[agreementId].status = AgreementStatus.Rejected;
+        emit AgreementRejected(agreementId);
+    }
+
     function fundAgreement(uint256 agreementId)
         public
         payable
         onlyShipperOf(agreementId)
-        inStatus(agreementId, AgreementStatus.Created)
+        inStatus(agreementId, AgreementStatus.Accepted)
     {
         Agreement storage agreement = agreements[agreementId];
 
@@ -412,6 +456,26 @@ contract Escrow {
         agreement.status = AgreementStatus.Funded;
 
         emit AgreementFunded(agreementId, msg.value);
+    }
+
+    function extendDeadline(uint256 agreementId, uint256 newDeadline)
+        public
+        onlyShipperOf(agreementId)
+    {
+        Agreement storage agreement = agreements[agreementId];
+
+        require(
+            agreement.status != AgreementStatus.Completed &&
+            agreement.status != AgreementStatus.Refunded &&
+            agreement.status != AgreementStatus.Disputed &&
+            agreement.status != AgreementStatus.Rejected,
+            "Agreement is closed"
+        );
+        require(newDeadline > agreement.deadline, "New deadline must be later");
+
+        agreement.deadline = newDeadline;
+
+        emit DeadlineExtended(agreementId, newDeadline);
     }
 
     function verifyMilestone(uint256 agreementId,uint256 milestoneIndex)
@@ -454,19 +518,25 @@ contract Escrow {
             "Payout exceeds escrow balance"
         );
 
+        uint256 commission = (payout * COMMISSION_PERCENT) / 100;
+        uint256 carrierAmount = payout - commission;
+
         milestone.completed = true;
         milestone.completedTimestamp = block.timestamp;
 
         agreement.releasedAmount += payout;
+        arbitratorEarnings += commission;
 
         (bool sent, ) =
             payable(agreement.carrier).call{
-                value: payout
+                value: carrierAmount
             }("");
 
         require(
             sent, "Payment to carrier failed"
         );
+
+        emit CommissionCollected(agreementId, commission);
 
         bool allCompleted = true;
 
@@ -482,7 +552,7 @@ contract Escrow {
 
             reputationToken.mint(
                 agreement.carrier,
-                100
+                completionReward
             );
         } else {
             agreement.status = AgreementStatus.InProgress;
@@ -492,10 +562,26 @@ contract Escrow {
         );
     }
 
+    function withdrawCommission() public onlyArbitrator nonReentrant {
+        uint256 amount = arbitratorEarnings;
+        require(amount > 0, "No commission to withdraw");
+
+        arbitratorEarnings = 0;
+
+        (bool sent, ) = payable(arbitrator).call{value: amount}("");
+        require(sent, "Commission withdrawal failed");
+
+        emit CommissionWithdrawn(amount);
+    }
+
     modifier onlyArbitrator() {
         require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
         _;
     }
+
+    /* ===============================
+     * DEADLINES, REFUNDS & DISPUTES 
+     * ===============================*/
 
     function checkAndRefund(uint256 agreementId) public nonReentrant {
         Agreement storage agreement = agreements[agreementId];
@@ -510,6 +596,7 @@ contract Escrow {
         require(remaining > 0, "No remaining funds to refund");
 
         agreement.status = AgreementStatus.Refunded;
+        agreement.releasedAmount += remaining;
 
         (bool sent, ) = payable(agreement.shipper).call{value: remaining}("");
         require(sent, "Refund transfer to shipper failed");
@@ -550,7 +637,6 @@ contract Escrow {
         agreement.disputeOtherReason = otherReason;
         agreement.status = AgreementStatus.Disputed;
     
-
         emit DisputeRaised(agreementId, msg.sender);
     }
 
@@ -568,6 +654,7 @@ contract Escrow {
         if (refundShipper) {
             agreement.status = AgreementStatus.Refunded;
             if (remaining > 0) {
+                agreement.releasedAmount += remaining;
                 (bool sent, ) = payable(agreement.shipper).call{value: remaining}("");
                 require(sent, "Refund to shipper failed");
             }
@@ -575,18 +662,35 @@ contract Escrow {
         } else {
             agreement.status = AgreementStatus.Completed;
             if (remaining > 0) {
+                // Same commission cut as a normal milestone payout.
+                uint256 commission = (remaining * COMMISSION_PERCENT) / 100;
+                uint256 carrierAmount = remaining - commission;
+
                 agreement.releasedAmount += remaining;
-                (bool sent, ) = payable(agreement.carrier).call{value: remaining}("");
+                arbitratorEarnings += commission;
+
+                (bool sent, ) = payable(agreement.carrier).call{value: carrierAmount}("");
                 require(sent, "Payout to carrier failed");
+
+                emit CommissionCollected(agreementId, commission);
             }
 
-            reputationToken.mint(agreement.carrier, 100);
+            reputationToken.mint(agreement.carrier, disputeWinReward);
 
             emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds paid to carrier");
         }
     }
 
-    /// @notice Participant submits evidence while a dispute is open, for the arbitrator to review.
+    function setCompletionReward(uint256 newReward) public onlyArbitrator {
+        completionReward = newReward;
+        emit ReputationRewardsUpdated(completionReward, disputeWinReward);
+    }
+
+    function setDisputeWinReward(uint256 newReward) public onlyArbitrator {
+        disputeWinReward = newReward;
+        emit ReputationRewardsUpdated(completionReward, disputeWinReward);
+    }
+
     function submitEvidence(
         uint256 agreementId,
         string memory description,
@@ -623,13 +727,11 @@ contract Escrow {
         );
     }
 
-    /// @notice How many pieces of evidence have been submitted for an agreement.
     function getEvidenceCount(uint256 agreementId) public view returns (uint256) {
         require(agreementId < agreementCount, "Agreement does not exist");
         return agreements[agreementId].evidence.length;
     }
 
-    /// @notice Read a single piece of evidence (for the arbitrator/UI to review before resolving).
     function getEvidence(uint256 agreementId, uint256 evidenceIndex) public view returns (
         address submittedBy,
         string memory description,
@@ -643,7 +745,6 @@ contract Escrow {
         return (e.submittedBy, e.description, e.fileCID, e.timestamp);
     }
 
-    /// @notice Read the reason a dispute was raised (for the arbitrator/UI).
     function getDisputeReason(uint256 agreementId) public view returns (
         uint8 reason,
         string memory otherReason
