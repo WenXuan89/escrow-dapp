@@ -404,6 +404,9 @@ contract('Escrow + ReputationToken', (accounts) => {
       // Reputation mint is a flat 100 points per completed agreement, not proportional to value
       const reputation = await token.balanceOf(carrier);
       assert.equal(reputation.toString(), '100');
+      assert.equal((await token.balanceOf(shipper)).toString(), '0');
+      assert.equal((await escrow.completionReputationEarned(carrier)).toString(), '100');
+      assert.equal((await escrow.disputeReputationEarned(carrier)).toString(), '0');
     });
  
     it('rejects verifying a milestone that has not been reported', async () => {
@@ -658,6 +661,21 @@ contract('Escrow + ReputationToken', (accounts) => {
       const e1 = await escrow.getEvidence(agreementId, 1);
       assert.equal(e1.submittedBy, carrier);
     });
+
+    it('keeps dispute evidence readable after the dispute is resolved', async () => {
+      await escrow.raiseDispute(agreementId, 4, '', { from: shipper });
+      await escrow.submitEvidence(agreementId, 'Photo of damaged package', '', { from: shipper });
+      await escrow.resolveDispute(agreementId, true, { from: deployer });
+
+      const a = await escrow.getAgreement(agreementId);
+      assert.equal(a.status.toString(), STATUS_REFUNDED);
+      assert.equal((await token.balanceOf(shipper)).toString(), '0');
+      assert.equal((await escrow.getEvidenceCount(agreementId)).toString(), '1');
+      const evidence = await escrow.getEvidence(agreementId, 0);
+      assert.equal(evidence.description, 'Photo of damaged package');
+      const reason = await escrow.getDisputeReason(agreementId);
+      assert.equal(reason.reason.toString(), '4');
+    });
  
     it('rejects evidence submission when the agreement is not disputed', async () => {
       await expectRevert(
@@ -736,6 +754,8 @@ contract('Escrow + ReputationToken', (accounts) => {
  
       const reputation = await token.balanceOf(carrier);
       assert.equal(reputation.toString(), '100');
+      assert.equal((await escrow.completionReputationEarned(carrier)).toString(), '0');
+      assert.equal((await escrow.disputeReputationEarned(carrier)).toString(), '100');
  
       const carrierBalAfter = new web3.utils.BN(await web3.eth.getBalance(carrier));
       assert.equal(carrierBalAfter.sub(carrierBalBefore).toString(), carrierAmount.toString());
@@ -903,6 +923,14 @@ contract('Escrow + ReputationToken', (accounts) => {
       await expectRevert(
         escrow.extendDeadline(agreementId, deadline - 100, { from: shipper }),
         'must be later'
+      );
+    });
+
+    it('rejects a replacement deadline that is later than the old deadline but already in the past', async () => {
+      await increaseTime(4000);
+      await expectRevert(
+        escrow.extendDeadline(agreementId, deadline + 1, { from: shipper }),
+        'New deadline must be in the future'
       );
     });
  
@@ -1140,6 +1168,11 @@ contract('Escrow + ReputationToken', (accounts) => {
         'Only arbitrator'
       );
     });
+
+    it('rejects zero-value reputation reward settings', async () => {
+      await expectRevert(escrow.setCompletionReward(0, { from: deployer }), 'greater than zero');
+      await expectRevert(escrow.setDisputeWinReward(0, { from: deployer }), 'greater than zero');
+    });
   });
  
   // Carrier service profile (location + delivery types offered)
@@ -1222,6 +1255,10 @@ contract('Escrow + ReputationToken', (accounts) => {
     it('rejects an out-of-range destination', async () => {
       await expectDetailRevert({ destination: 0 }, 'Invalid destination');
       await expectDetailRevert({ destination: 16 }, 'Invalid destination');
+    });
+
+    it('rejects an agreement whose origin and destination are the same', async () => {
+      await expectDetailRevert({ destination: agreementDetails.origin }, 'Origin and destination must differ');
     });
  
     it('rejects an out-of-range item type', async () => {

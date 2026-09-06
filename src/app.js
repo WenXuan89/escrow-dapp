@@ -31,6 +31,12 @@ const state = {
   activity: [],
   displayName: "",
   reputation: "0",
+  completionReputation: "0",
+  disputeReputation: "0",
+  arbitratorEarnings: "0",
+  completionReward: "100",
+  disputeWinReward: "100",
+  parcelPhotos: [],
   currentAgreementId: null,
   pendingAction: null,
   filter: "all",
@@ -267,14 +273,28 @@ function configureDashboardForRole() {
   $("#dashboardEyebrow").textContent = `${roleLabel(state.role)} dashboard`;
   $("#dashboardGreeting").textContent = isArbitrator ? "Dispute centre" : `Welcome back, ${roleLabel(state.role).toLowerCase()}`;
   $("#dashboardIntro").textContent = isArbitrator ? "Review frozen agreements and make a final on-chain decision." : "Here's what is happening with your delivery agreements.";
-  $("#agreementSectionTitle").textContent = isArbitrator ? "Disputed agreements" : "Your agreements";
-  $("#agreementSectionCopy").textContent = isArbitrator ? "Every agreement currently awaiting arbitration is listed here." : "Open an agreement to view balance, deadline and chronological milestone history.";
+  $("#agreementSectionTitle").textContent = isArbitrator ? "Dispute centre" : "Your agreements";
+  $("#agreementSectionCopy").textContent = isArbitrator ? "Review active and resolved disputes without losing their submitted evidence." : "Open an agreement to view balance, deadline and chronological milestone history.";
+  $("#allFilterButton").textContent = isArbitrator ? "All disputes" : "All";
+  $("#activeFilterButton").textContent = isArbitrator ? "Active" : "Active";
+  $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
+  $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
+  if (isArbitrator) {
+    $("#statOneLabel").textContent = "Active agreements";
+    $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
+    $("#statTwoLabel").textContent = "Active disputes";
+    $("#statTwoHelp").textContent = "Awaiting an on-chain ruling";
+    $("#statThreeLabel").textContent = "Completed agreements";
+    $("#statThreeHelp").textContent = "Successfully settled";
+    $("#statFourLabel").textContent = "Resolved disputes";
+    $("#statFourHelp").textContent = "Settled for shipper or carrier";
+  }
 }
 
 async function refreshAll() {
   if (!state.contract && !state.demo) return;
   try {
-    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements(), refreshProfile(), refreshActivity()]);
+    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements(), refreshProfile(), refreshActivity(), refreshArbitratorControls()]);
     renderDashboard();
     if (state.currentAgreementId !== null && $("#agreementDialog").open) await openAgreement(state.currentAgreementId, false);
   } catch (error) {
@@ -309,12 +329,18 @@ async function refreshCarriers() {
 async function refreshProfile() {
   if (state.demo) return;
   try { state.displayName = await state.contract.methods.displayName(state.account).call(); } catch (_) { state.displayName = ""; }
-  try { state.reputation = state.token ? await state.token.methods.balanceOf(state.account).call() : "0"; } catch (_) { state.reputation = "0"; }
+  if (state.role === ROLE.CARRIER) {
+    try { state.reputation = state.token ? await state.token.methods.balanceOf(state.account).call() : "0"; } catch (_) { state.reputation = "0"; }
+    try { state.completionReputation = await state.contract.methods.completionReputationEarned(state.account).call(); } catch (_) { state.completionReputation = "0"; }
+    try { state.disputeReputation = await state.contract.methods.disputeReputationEarned(state.account).call(); } catch (_) { state.disputeReputation = "0"; }
+  }
   $("#displayNameInput").value = state.displayName || "";
   const points = Number(state.reputation || 0);
   const stars = Math.min(5, Math.floor(points / 100));
   $("#reputationStars").textContent = `${"★".repeat(stars)}${"☆".repeat(5 - stars)}`;
   $("#reputationPoints").textContent = `${points.toLocaleString()} point${points === 1 ? "" : "s"}`;
+  $("#completionReputation").textContent = Number(state.completionReputation || 0).toLocaleString();
+  $("#disputeReputation").textContent = Number(state.disputeReputation || 0).toLocaleString();
   if (state.role === ROLE.CARRIER) {
     try {
       const profile = await state.contract.methods.getCarrierProfile(state.account).call();
@@ -331,10 +357,29 @@ function supportsMethod(name) {
 }
 
 function renderCapabilityNotice() {
-  const missing = ["acceptAgreement", "rejectAgreement", "extendDeadline", "withdrawCommission", "setRewardAmount"].filter(name => !supportsMethod(name));
+  if (state.role !== ROLE.ARBITRATOR) return;
+  const missing = ["acceptAgreement", "rejectAgreement", "extendDeadline", "withdrawCommission", "setCompletionReward", "setDisputeWinReward"].filter(name => !supportsMethod(name));
   $("#backendCapabilityText").textContent = missing.length
     ? `This deployment supports shipment details, carrier profiles, reputation and disputes. Acceptance, rejection, deadline extension, commission withdrawal and reward settings require the planned Solidity update.`
     : "All planned frontend integration methods are present in this deployment.";
+}
+
+async function refreshArbitratorControls() {
+  if (state.role !== ROLE.ARBITRATOR || state.demo) return;
+  try {
+    const [earnings, completion, dispute] = await Promise.all([
+      state.contract.methods.arbitratorEarnings().call(),
+      state.contract.methods.completionReward().call(),
+      state.contract.methods.disputeWinReward().call()
+    ]);
+    state.arbitratorEarnings = earnings;
+    state.completionReward = completion;
+    state.disputeWinReward = dispute;
+    $("#arbitratorEarnings").textContent = formatEth(earnings);
+    $("#completionRewardInput").value = completion;
+    $("#disputeRewardInput").value = dispute;
+    $("#withdrawCommissionButton").disabled = BigInt(earnings) === 0n;
+  } catch (_) { /* capability notice explains older deployments */ }
 }
 
 async function refreshActivity() {
@@ -342,7 +387,12 @@ async function refreshActivity() {
   try {
     const events = await state.contract.getPastEvents("allEvents", { fromBlock: 0, toBlock: "latest" });
     const account = state.account.toLowerCase();
-    state.activity = events.filter(event => Object.values(event.returnValues || {}).some(value => typeof value === "string" && value.toLowerCase() === account)).slice(-12).reverse();
+    const visible = state.role === ROLE.ARBITRATOR ? events : events.filter(event => Object.values(event.returnValues || {}).some(value => typeof value === "string" && value.toLowerCase() === account));
+    const recent = visible.slice(-20).reverse();
+    const blockNumbers = [...new Set(recent.map(event => event.blockNumber))];
+    const blocks = await Promise.all(blockNumbers.map(number => state.web3.eth.getBlock(number)));
+    const timestamps = Object.fromEntries(blocks.map(block => [block.number, Number(block.timestamp)]));
+    state.activity = recent.map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 })).sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
   } catch (_) { state.activity = []; }
 }
 
@@ -395,7 +445,7 @@ async function loadAgreement(id, includeEvidence = false) {
     agreement.disputeReason = Number(valueAt(reasonResult, "reason", 0));
     agreement.disputeOtherReason = valueAt(reasonResult, "otherReason", 1);
   } catch (_) { agreement.disputeReason = 0; agreement.disputeOtherReason = ""; }
-  if (includeEvidence && agreement.status === 5) {
+  if (includeEvidence && agreement.disputeReason > 0) {
     const evidenceCount = await state.contract.methods.getEvidenceCount(id).call();
     agreement.evidence = await Promise.all(Array.from({ length: Number(evidenceCount) }, async (_, index) => {
       const evidence = await state.contract.methods.getEvidence(id, index).call();
@@ -414,7 +464,7 @@ async function refreshAgreements() {
   if (state.demo) return;
   const ids = await agreementIdsForCurrentUser();
   const all = await Promise.all([...ids].reverse().map(id => loadAgreement(id)));
-  state.agreements = state.role === ROLE.ARBITRATOR ? all.filter(item => item.disputeReason > 0 || item.status === 5) : all;
+  state.agreements = all;
 }
 
 function escrowRemaining(agreement) {
@@ -438,14 +488,24 @@ function needsAttention(agreement) {
 function renderDashboard() {
   const active = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
   const completed = state.agreements.filter(agreement => agreement.status === 3);
+  const activeDisputes = state.agreements.filter(agreement => agreement.status === 5);
+  const resolvedDisputes = state.agreements.filter(agreement => agreement.disputeReason > 0 && agreement.status !== 5);
   const totalEscrow = state.agreements.reduce((sum, agreement) => {
     if (state.demo) return sum + escrowRemaining(agreement);
     return sum + BigInt(escrowRemaining(agreement));
   }, state.demo ? 0 : 0n);
-  $("#escrowBalance").textContent = formatEth(totalEscrow);
-  $("#activeCount").textContent = active.length;
-  $("#completedCount").textContent = completed.length;
-  $("#agreementNavCount").textContent = state.agreements.length;
+  if (state.role === ROLE.ARBITRATOR) {
+    $("#walletBalance").textContent = active.length;
+    $("#escrowBalance").textContent = activeDisputes.length;
+    $("#activeCount").textContent = completed.length;
+    $("#completedCount").textContent = resolvedDisputes.length;
+    $("#agreementNavCount").textContent = activeDisputes.length + resolvedDisputes.length;
+  } else {
+    $("#escrowBalance").textContent = formatEth(totalEscrow);
+    $("#activeCount").textContent = active.length;
+    $("#completedCount").textContent = completed.length;
+    $("#agreementNavCount").textContent = state.agreements.length;
+  }
   renderRecentAgreements();
   renderAgreementGrid();
   renderCarriers();
@@ -460,7 +520,7 @@ function counterpart(agreement) {
 
 function renderRecentAgreements() {
   const container = $("#recentAgreementList");
-  const recent = state.agreements.slice(0, 4);
+  const recent = (state.role === ROLE.ARBITRATOR ? state.agreements.filter(agreement => agreement.disputeReason > 0) : state.agreements).slice(0, 4);
   if (!recent.length) {
     container.innerHTML = `<div class="empty-state"><strong>No agreements yet</strong>${state.role === ROLE.SHIPPER ? "Choose a carrier and create your first escrow." : "Agreements assigned to this wallet will appear here."}</div>`;
     return;
@@ -479,6 +539,7 @@ function renderRecentAgreements() {
 function agreementMatchesFilter(agreement) {
   let matchesStatus = true;
   if (state.role === ROLE.ARBITRATOR) {
+    matchesStatus = agreement.disputeReason > 0;
     if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 5;
     if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 5;
   } else {
@@ -565,8 +626,8 @@ function renderMarketplace() {
 }
 
 function renderActivity() {
-  const labels = { AgreementCreated: "Agreement created", AgreementFunded: "Escrow funded", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
-  $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>Block ${event.blockNumber} · transaction ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent account events</strong>New on-chain activity will appear here.</div>`;
+  const labels = { AgreementCreated: "Agreement created", AgreementAccepted: "Agreement accepted", AgreementRejected: "Agreement rejected", AgreementFunded: "Escrow funded", DeadlineExtended: "Deadline extended", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CommissionCollected: "Commission collected", CommissionWithdrawn: "Commission withdrawn", ReputationRewardsUpdated: "Reward settings updated", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
+  $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>${event.timestamp ? formatDate(event.timestamp) + " · " : ""}Block ${event.blockNumber} · ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent activity</strong>New on-chain activity will appear here.</div>`;
 }
 
 function selectCarrier(address) {
@@ -625,7 +686,7 @@ async function createAgreement(event) {
   const types = rows.map(row => Number($(".milestone-type", row).value));
   const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
   const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
-  const details = [Number($("#origin").value), Number($("#destination").value), Number($("#itemType").value), Number($("#parcelSize").value), String(Math.round(Number($("#weight").value) * 1000)), Number($("#deliverySpeed").value), Number($("#guaranteeTier").value), $("#photoCID").value.trim()];
+  const details = [Number($("#origin").value), Number($("#destination").value), Number($("#itemType").value), Number($("#parcelSize").value), String(Math.round(Number($("#weight").value) * 1000)), Number($("#deliverySpeed").value), Number($("#guaranteeTier").value), ""];
   if (!carrier) return showToast("Select a registered carrier.", "error");
   if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
   if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
@@ -634,12 +695,12 @@ async function createAgreement(event) {
   if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
   if (details[0] === details[1]) return showToast("Origin and destination must be different.", "error");
   if (Number(details[4]) <= 0) return showToast("Weight must be greater than zero.", "error");
-  if ($("#parcelPhotoFile").files?.length && !details[7]) return showToast("The selected parcel photo is only a local preview. Upload it to IPFS and enter its CID or image URL before creating the agreement.", "error");
   const totalValue = state.web3.utils.toWei(ethValue, "ether");
   try {
     const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
     if (!receipt) return;
     event.target.reset();
+    clearParcelPhotos();
     $("#selectedCarrier").value = "";
     $("#milestoneRows").innerHTML = "";
     addMilestoneRow(1, 30);
@@ -685,7 +746,7 @@ function imageProof(cid, alt, caption = "Open original") {
 }
 
 function imageInputMarkup(name, label, description) {
-  return `<div class="image-input-card" data-image-input><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(description)}</small></div><label class="file-button">Choose photo<input type="file" accept="image/*" data-image-file></label><label>IPFS CID or image URL<input name="${escapeHtml(name)}" type="text" placeholder="bafy… or https://…" data-image-cid></label><figure class="image-preview hidden" data-image-preview-wrap><img alt="${escapeHtml(label)} preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure></div>`;
+  return `<div class="image-input-card" data-image-input><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(description)}</small></div><label class="file-button">Choose photo<input name="${escapeHtml(name)}" type="file" accept="image/*" data-image-file></label><figure class="image-preview hidden" data-image-preview-wrap><img alt="${escapeHtml(label)} preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure></div>`;
 }
 
 function updateImagePreview(input) {
@@ -697,12 +758,70 @@ function updateImagePreview(input) {
     const file = input.files?.[0];
     if (!file) return;
     preview.src = URL.createObjectURL(file); wrap.classList.remove("hidden");
-    caption.textContent = `${file.name} — local preview only; enter a CID or URL before submitting.`;
+    caption.textContent = `${file.name} — selected for this form.`;
     return;
   }
-  const url = imageUrl(input.value);
-  if (!url) { wrap.classList.add("hidden"); preview.removeAttribute("src"); return; }
-  preview.src = url; wrap.classList.remove("hidden"); caption.textContent = "This CID or URL will be saved on-chain.";
+}
+
+function parcelPhotoKey(file) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function syncParcelPhotoInput() {
+  const input = $("#parcelPhotoFile");
+  if (!input || typeof DataTransfer === "undefined") return;
+  const transfer = new DataTransfer();
+  state.parcelPhotos.forEach(item => transfer.items.add(item.file));
+  input.files = transfer.files;
+}
+
+function renderParcelPhotoPreviews() {
+  const grid = $("#parcelPhotoGrid");
+  const count = state.parcelPhotos.length;
+  $("#parcelPhotoCount").textContent = count ? `${count} photo${count === 1 ? "" : "s"} selected` : "No photos selected";
+  grid.classList.toggle("hidden", count === 0);
+  grid.innerHTML = state.parcelPhotos.map((item, index) => `<figure class="selected-photo">
+    <button class="photo-remove" type="button" data-parcel-photo-remove="${index}" aria-label="Remove ${escapeHtml(item.file.name)}">×</button>
+    <button class="photo-open" type="button" data-parcel-photo-open="${index}" aria-label="Enlarge ${escapeHtml(item.file.name)}"><img src="${escapeHtml(item.url)}" alt="Selected parcel photo ${index + 1}"></button>
+    <figcaption title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</figcaption>
+  </figure>`).join("");
+}
+
+function addParcelPhotos(input) {
+  const existing = new Set(state.parcelPhotos.map(item => item.key));
+  [...(input.files || [])].forEach(file => {
+    if (!file.type.startsWith("image/")) return;
+    const key = parcelPhotoKey(file);
+    if (!existing.has(key)) {
+      state.parcelPhotos.push({ file, key, url: URL.createObjectURL(file) });
+      existing.add(key);
+    }
+  });
+  syncParcelPhotoInput();
+  renderParcelPhotoPreviews();
+}
+
+function removeParcelPhoto(index) {
+  const [removed] = state.parcelPhotos.splice(index, 1);
+  if (removed) URL.revokeObjectURL(removed.url);
+  syncParcelPhotoInput();
+  renderParcelPhotoPreviews();
+}
+
+function clearParcelPhotos() {
+  state.parcelPhotos.forEach(item => URL.revokeObjectURL(item.url));
+  state.parcelPhotos = [];
+  const input = $("#parcelPhotoFile");
+  if (input) input.value = "";
+  renderParcelPhotoPreviews();
+}
+
+function openParcelPhoto(index) {
+  const item = state.parcelPhotos[index];
+  if (!item) return;
+  $("#photoLightboxImage").src = item.url;
+  $("#photoLightboxCaption").textContent = item.file.name;
+  $("#photoLightbox").showModal();
 }
 
 function milestoneButtons(agreement, milestone) {
@@ -727,7 +846,7 @@ function renderAgreementDetail(agreement) {
   const canDispute = [ROLE.SHIPPER, ROLE.CARRIER].includes(state.role) && ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline >= Date.now() / 1000;
   const canRefund = ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
   const isParticipant = [agreement.shipper, agreement.carrier].some(address => address.toLowerCase() === state.account.toLowerCase());
-  const disputeReason = agreement.status === 5 ? (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : "";
+  const disputeReason = agreement.disputeReason > 0 ? (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : "";
   const details = agreement.details;
   $("#agreementDetail").innerHTML = `
     <div class="detail-head"><span class="section-label">On-chain agreement</span><div class="detail-title-row"><div><h2>Agreement #${agreement.id}</h2><p>${shortAddress(agreement.shipper, 9, 6)} → ${shortAddress(agreement.carrier, 9, 6)}</p></div>${statusPill(agreement.status)}</div></div>
@@ -739,7 +858,7 @@ function renderAgreementDetail(agreement) {
         <div class="detail-stat"><span>Deadline</span><strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong></div>
       </div>
       ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div></div>${details.photoCID ? `<div class="proof-gallery"><div><span class="section-label">Parcel photo</span>${imageProof(details.photoCID, `Parcel for agreement ${agreement.id}`, "View parcel photo")}</div></div>` : ""}` : ""}
-      ${agreement.status === 5 ? `<div class="evidence-card"><span class="section-label">Dispute reason</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
+      ${agreement.disputeReason > 0 ? `<div class="evidence-card"><span class="section-label">${agreement.status === 5 ? "Active dispute" : "Resolved dispute"}</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
       <div class="detail-section-title"><h3>Milestone progress</h3><span>${complete} of ${agreement.milestones.length} verified</span></div>
       <div class="milestone-stepper">${agreement.milestones.map(milestone => `
         <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
@@ -750,13 +869,14 @@ function renderAgreementDetail(agreement) {
         </div>`).join("")}</div>
       <div class="detail-section-title"><h3>Chronological history</h3><span>Newest first</span></div>
       <div class="timeline">${events.length ? events.map(event => `<div class="timeline-event"><strong>${escapeHtml(event.title)}</strong><span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span></div>`).join("") : `<div class="timeline-event"><strong>No milestone activity yet</strong><span>Reports and verifications will appear here.</span></div>`}</div>
-      ${agreement.status === 5 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>Participants can attach a description and optional IPFS CID.</div>`}</div>` : ""}
+      ${agreement.disputeReason > 0 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>No participant evidence was attached to this dispute.</div>`}</div>` : ""}
       <div class="detail-actions">
         ${agreement.status === 0 && state.role === ROLE.CARRIER ? `<button class="button button-primary" type="button" data-action="accept">Accept agreement</button><button class="button button-danger" type="button" data-action="reject">Reject agreement</button>` : ""}
         ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>` : ""}
         ${agreement.status === 6 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
         ${agreement.status === 6 && state.role === ROLE.CARRIER ? `<span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>` : ""}
         ${agreement.status === 7 ? `<span class="action-note">This agreement was rejected and cannot be funded.</span>` : ""}
+        ${state.role === ROLE.SHIPPER && ![3, 4, 5, 7].includes(agreement.status) ? `<button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>` : ""}
         ${canDispute ? `<button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>` : ""}
         ${canRefund ? `<button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>` : ""}
         ${agreement.status === 5 && isParticipant ? `<button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>` : ""}
@@ -776,17 +896,25 @@ function openActionDialog(action, milestoneIndex = null) {
   submit.textContent = "Confirm";
   if (action === "report") {
     title.textContent = "Report milestone";
-    description.textContent = "Record delivery progress and optionally attach a proof photo. The contract stores its CID or URL.";
+    description.textContent = "Record delivery progress and optionally choose a proof photo for preview.";
     fields.innerHTML = imageInputMarkup("proofCID", "Milestone delivery photo (optional)", "Photograph the parcel, checkpoint, receiver, or delivery document.");
     submit.textContent = "Report on-chain";
+  } else if (action === "extend") {
+    const agreement = state.agreements.find(item => item.id === state.currentAgreementId);
+    const minimum = new Date(Math.max(Date.now() + 60000, (agreement?.deadline + 60) * 1000));
+    minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
+    title.textContent = "Extend delivery deadline";
+    description.textContent = "Choose a new deadline later than both the current deadline and the present time.";
+    fields.innerHTML = `<label>New deadline<input name="newDeadline" type="datetime-local" min="${minimum.toISOString().slice(0, 16)}" value="${minimum.toISOString().slice(0, 16)}" required></label>`;
+    submit.textContent = "Extend deadline";
   } else if (action === "dispute") {
     title.textContent = "Raise a dispute";
     description.textContent = "Raising a dispute freezes payouts. Optional evidence is submitted in a second wallet transaction after the dispute opens.";
-    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Add an IPFS CID or image URL. A description is required when evidence is attached.")}`;
+    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Choose a supporting photo to preview before submitting.")}`;
   } else if (action === "evidence") {
     title.textContent = "Submit dispute evidence";
     description.textContent = "Evidence is permanently associated with this disputed agreement.";
-    fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label>${imageInputMarkup("fileCID", "Evidence photo or document (optional)", "Enter the uploaded file's IPFS CID or a public URL to save it on-chain.")}`;
+    fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label>${imageInputMarkup("fileCID", "Evidence photo or document (optional)", "Choose a supporting photo to preview before submitting.")}`;
     submit.textContent = "Submit evidence";
   }
   $("#actionDialog").showModal();
@@ -795,7 +923,7 @@ function openActionDialog(action, milestoneIndex = null) {
 async function handleDetailAction(action, milestoneIndex) {
   const agreement = state.agreements.find(item => item.id === state.currentAgreementId);
   if (!agreement) return;
-  if (["report", "dispute", "evidence"].includes(action)) return openActionDialog(action, milestoneIndex);
+  if (["report", "dispute", "evidence", "extend"].includes(action)) return openActionDialog(action, milestoneIndex);
   if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
   try {
     if (action === "accept" && confirm("Accept this delivery agreement? The shipper will then be able to fund it.")) await sendTransaction(state.contract.methods.acceptAgreement(agreement.id), {}, "Accept agreement");
@@ -812,29 +940,30 @@ async function submitAction(event) {
   event.preventDefault();
   const data = new FormData(event.target);
   const { action, agreementId, milestoneIndex } = state.pendingAction || {};
-  const localPhoto = $("[data-image-file]", $("#actionFields"));
-  const storedPhoto = $("[data-image-cid]", $("#actionFields"));
-  if (localPhoto?.files?.length && !storedPhoto?.value.trim()) return showToast("The selected photo is only a local preview. Upload it to IPFS and enter its CID or image URL before submitting.", "error");
   if (state.demo) {
     $("#actionDialog").close();
     return showToast("Transactions are disabled in preview mode.", "error");
   }
   try {
-    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex, String(data.get("proofCID") || "").trim()), {}, "Report milestone");
+    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex, ""), {}, "Report milestone");
+    if (action === "extend") {
+      const agreement = state.agreements.find(item => item.id === Number(agreementId));
+      const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
+      if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) return showToast("Choose a deadline later than the current deadline.", "error");
+      await sendTransaction(state.contract.methods.extendDeadline(agreementId, newDeadline), {}, "Extend deadline");
+    }
     if (action === "dispute") {
       const reason = Number(data.get("reason"));
       const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
       const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
-      const evidenceCID = String(data.get("evidenceCID") || "").trim();
       if (reason === 5 && !otherReason) return showToast("Enter the other dispute reason.", "error");
-      if (evidenceCID && !evidenceDescription) return showToast("Describe what the dispute evidence photo shows.", "error");
       await sendTransaction(state.contract.methods.raiseDispute(agreementId, reason, otherReason), {}, "Raise dispute");
-      if (evidenceDescription) await sendTransaction(state.contract.methods.submitEvidence(agreementId, evidenceDescription, evidenceCID), {}, "Submit dispute evidence");
+      if (evidenceDescription) await sendTransaction(state.contract.methods.submitEvidence(agreementId, evidenceDescription, ""), {}, "Submit dispute evidence");
     }
     if (action === "evidence") {
       const description = String(data.get("description") || "").trim();
       if (!description) return showToast("Evidence description is required.", "error");
-      await sendTransaction(state.contract.methods.submitEvidence(agreementId, description, String(data.get("fileCID") || "").trim()), {}, "Submit evidence");
+      await sendTransaction(state.contract.methods.submitEvidence(agreementId, description, ""), {}, "Submit evidence");
     }
     $("#actionDialog").close();
   } catch (_) { /* already surfaced */ }
@@ -921,6 +1050,28 @@ async function saveCarrierProfile(event) {
   try { await sendTransaction(state.contract.methods.setCarrierProfile(locationValue, mask), {}, "Update carrier profile"); } catch (_) { /* surfaced */ }
 }
 
+async function withdrawCommission() {
+  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (BigInt(state.arbitratorEarnings || 0) === 0n) return showToast("There is no commission available to withdraw.", "error");
+  if (!confirm(`Withdraw ${formatEth(state.arbitratorEarnings)} to the arbitrator wallet?`)) return;
+  try { await sendTransaction(state.contract.methods.withdrawCommission(), {}, "Withdraw commission"); } catch (_) { /* surfaced */ }
+}
+
+async function saveRewardSettings(event) {
+  event.preventDefault();
+  const completion = Number($("#completionRewardInput").value);
+  const dispute = Number($("#disputeRewardInput").value);
+  if (!Number.isSafeInteger(completion) || completion <= 0 || !Number.isSafeInteger(dispute) || dispute <= 0) return showToast("Reward values must be positive whole numbers.", "error");
+  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  const updateCompletion = String(completion) !== String(state.completionReward);
+  const updateDispute = String(dispute) !== String(state.disputeWinReward);
+  try {
+    if (updateCompletion) await sendTransaction(state.contract.methods.setCompletionReward(completion), {}, "Update completion reward");
+    if (updateDispute) await sendTransaction(state.contract.methods.setDisputeWinReward(dispute), {}, "Update dispute reward");
+    if (!updateCompletion && !updateDispute) showToast("Reward settings are already up to date.");
+  } catch (_) { /* surfaced */ }
+}
+
 function bindEvents() {
   $("#connectButton").addEventListener("click", () => connectWallet(true));
   $$('[data-connect]').forEach(button => button.addEventListener("click", () => connectWallet(true)));
@@ -936,6 +1087,8 @@ function bindEvents() {
   $("#agreementForm").addEventListener("submit", createAgreement);
   $("#displayNameForm").addEventListener("submit", saveDisplayName);
   $("#carrierProfileForm").addEventListener("submit", saveCarrierProfile);
+  $("#withdrawCommissionButton").addEventListener("click", withdrawCommission);
+  $("#rewardSettingsForm").addEventListener("submit", saveRewardSettings);
   ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace));
   $("#agreementMonth").addEventListener("change", event => { state.monthFilter = event.target.value; renderAgreementGrid(); });
   $("#agreementDate").addEventListener("change", event => { state.dateFilter = event.target.value; renderAgreementGrid(); });
@@ -962,6 +1115,18 @@ function bindEvents() {
     updatePercentageTotal();
   });
   document.addEventListener("click", event => {
+    const removePhoto = event.target.closest("[data-parcel-photo-remove]");
+    if (removePhoto) {
+      event.preventDefault();
+      removeParcelPhoto(Number(removePhoto.dataset.parcelPhotoRemove));
+      return;
+    }
+    const openPhoto = event.target.closest("[data-parcel-photo-open]");
+    if (openPhoto) {
+      event.preventDefault();
+      openParcelPhoto(Number(openPhoto.dataset.parcelPhotoOpen));
+      return;
+    }
     const nav = event.target.closest("[data-section-target]");
     if (nav) showSection(nav.dataset.sectionTarget);
     const carrier = event.target.closest("[data-select-carrier]");
@@ -982,19 +1147,22 @@ function bindEvents() {
   });
   $$('[data-close-dialog]').forEach(button => button.addEventListener("click", () => $("#agreementDialog").close()));
   $$('[data-close-action-dialog]').forEach(button => button.addEventListener("click", () => $("#actionDialog").close()));
+  $$('[data-close-photo-lightbox]').forEach(button => button.addEventListener("click", () => $("#photoLightbox").close()));
   $("#actionForm").addEventListener("submit", submitAction);
   $("#actionFields").addEventListener("change", event => {
     if (event.target.name === "reason") $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
     if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
   });
-  document.addEventListener("input", event => { if (event.target.matches("[data-image-cid]")) updateImagePreview(event.target); });
-  document.addEventListener("change", event => { if (event.target.matches("[data-image-file]")) updateImagePreview(event.target); });
+  document.addEventListener("change", event => {
+    if (event.target.id === "parcelPhotoFile") addParcelPhotos(event.target);
+    else if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
+  });
   document.addEventListener("error", event => {
     if (!event.target.matches?.("[data-proof-image], [data-image-preview]") || event.target.dataset.fallback) return;
     event.target.dataset.fallback = "1";
     event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
   }, true);
-  [$("#agreementDialog"), $("#actionDialog")].forEach(dialog => dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); }));
+  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); }));
 }
 
 async function init() {

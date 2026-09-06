@@ -82,7 +82,7 @@
       <span class="section-label">A trust-minimised workflow</span>
       <div class="workflow-grid">
         <article><b>01</b><h3>Create & fund</h3><p>A shipper chooses a registered carrier, defines milestones and locks the exact agreement value.</p></article>
-        <article><b>02</b><h3>Report progress</h3><p>The assigned carrier reports each checkpoint, optionally attaching an IPFS proof CID.</p></article>
+        <article><b>02</b><h3>Report progress</h3><p>The assigned carrier reports each checkpoint and can preview a supporting delivery photo.</p></article>
         <article><b>03</b><h3>Verify & release</h3><p>Shipper verification releases the milestone payout directly from escrow to the carrier.</p></article>
       </div>
     </section>
@@ -130,7 +130,7 @@
           <button class="nav-item shipper-only" type="button" data-section-target="marketplaceSection"><span>⌕</span>Carrier marketplace</button>
           <button id="createNavItem" class="nav-item shipper-only" type="button" data-section-target="createSection"><span>＋</span>New agreement</button>
           <button class="nav-item" type="button" data-section-target="profileSection"><span>◎</span>My profile</button>
-          <button id="arbitrationNavItem" class="nav-item arbitrator-only hidden" type="button" data-section-target="agreementsSection"><span>⚖</span>Disputes</button>
+          <button id="arbitrationNavItem" class="nav-item arbitrator-only" type="button" data-section-target="agreementsSection"><span>⚖</span>Disputes</button>
         </nav>
         <div class="sidebar-foot"><span>Smart-contract secured</span><small id="contractAddressShort">Contract not loaded</small></div>
       </aside>
@@ -142,10 +142,22 @@
             <button id="refreshButton" class="button button-secondary" type="button"><span>↻</span> Refresh</button>
           </div>
           <div class="stat-grid">
-            <article class="stat-card accent"><span>Wallet balance</span><strong id="walletBalance">—</strong><small>Connected account</small></article>
-            <article class="stat-card"><span>Locked in my escrows</span><strong id="escrowBalance">—</strong><small>Funded minus released</small></article>
-            <article class="stat-card"><span>Active agreements</span><strong id="activeCount">—</strong><small>Funded or in progress</small></article>
-            <article class="stat-card"><span>Completed</span><strong id="completedCount">—</strong><small>Successfully settled</small></article>
+            <article class="stat-card accent"><span id="statOneLabel">Wallet balance</span><strong id="walletBalance">—</strong><small id="statOneHelp">Connected account</small></article>
+            <article class="stat-card"><span id="statTwoLabel">Locked in my escrows</span><strong id="escrowBalance">—</strong><small id="statTwoHelp">Funded minus released</small></article>
+            <article class="stat-card"><span id="statThreeLabel">Active agreements</span><strong id="activeCount">—</strong><small id="statThreeHelp">Created, accepted, funded or in progress</small></article>
+            <article class="stat-card"><span id="statFourLabel">Completed</span><strong id="completedCount">—</strong><small id="statFourHelp">Successfully settled</small></article>
+          </div>
+
+          <div class="panel arbitrator-only admin-panel">
+            <div class="panel-heading"><div><span class="section-label">Arbitrator controls</span><h3>Commission and reputation rewards</h3></div></div>
+            <div class="admin-control-grid">
+              <div class="earnings-card"><span>Available commission</span><strong id="arbitratorEarnings">0 ETH</strong><small>5% collected from verified milestones and carrier-favouring dispute payouts</small><button id="withdrawCommissionButton" class="button button-primary" type="button">Withdraw commission</button></div>
+              <form id="rewardSettingsForm" class="reward-form">
+                <label>Completed-delivery reward<input id="completionRewardInput" type="number" min="1" step="1" required><small>Reputation points minted to the carrier</small></label>
+                <label>Carrier dispute-win reward<input id="disputeRewardInput" type="number" min="1" step="1" required><small>Reputation points minted when the ruling favours the carrier</small></label>
+                <button class="button button-secondary" type="submit">Save reward settings</button>
+              </form>
+            </div>
           </div>
 
           <div class="content-grid">
@@ -170,10 +182,10 @@
             <div><span class="section-label">On-chain participation</span><h2 id="agreementSectionTitle">Agreements</h2><p id="agreementSectionCopy">Open an agreement to view balance, deadline and chronological milestone history.</p></div>
           </div>
           <div class="filter-row" role="group" aria-label="Filter agreements">
-            <button class="filter-chip active" type="button" data-filter="all">All</button>
-            <button class="filter-chip" type="button" data-filter="active">Active</button>
-            <button class="filter-chip" type="button" data-filter="attention">Needs attention</button>
-            <button class="filter-chip" type="button" data-filter="closed">Closed</button>
+            <button id="allFilterButton" class="filter-chip active" type="button" data-filter="all">All</button>
+            <button id="activeFilterButton" class="filter-chip" type="button" data-filter="active">Active</button>
+            <button id="attentionFilterButton" class="filter-chip" type="button" data-filter="attention">Needs attention</button>
+            <button id="closedFilterButton" class="filter-chip" type="button" data-filter="closed">Closed</button>
             <label class="compact-filter">Month<input id="agreementMonth" type="month"></label>
             <label class="compact-filter">Exact date<input id="agreementDate" type="date"></label>
             <button id="clearDateFilters" class="text-button" type="button">Clear dates</button>
@@ -210,10 +222,10 @@
               <label>Delivery speed<select id="deliverySpeed" name="deliverySpeed" required><option value="1">Standard</option><option value="2">Express</option><option value="3">Same day</option><option value="4">Scheduled</option></select></label>
               <label>Guarantee tier<select id="guaranteeTier" name="guaranteeTier" required><option value="1">Basic</option><option value="2">Protected</option><option value="3">Premium</option></select></label>
               <div class="image-input-card full-field" data-image-input>
-                <div><strong>Parcel photo (optional)</strong><small>Choose a photo for preview, then enter its IPFS CID or image URL to save it on-chain.</small></div>
-                <label class="file-button">Choose photo<input id="parcelPhotoFile" type="file" accept="image/*" data-image-file></label>
-                <label>IPFS CID or image URL<input id="photoCID" name="photoCID" type="text" placeholder="bafy… or https://…" data-image-cid></label>
-                <figure class="image-preview hidden" data-image-preview-wrap><img alt="Parcel preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure>
+                <div><strong>Parcel photos (optional)</strong><small>Select one or more photos. Click a preview to enlarge it, or × to remove it and choose again.</small></div>
+                <label class="file-button">Choose photos<input id="parcelPhotoFile" type="file" accept="image/*" multiple></label>
+                <span id="parcelPhotoCount" class="photo-count">No photos selected</span>
+                <div id="parcelPhotoGrid" class="selected-photo-grid hidden" aria-live="polite"></div>
               </div>
               <label>Total value (ETH)<input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="0.015" required><small id="priceSuggestion" class="field-help">Suggested price appears as shipment details change.</small></label>
               <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required></label>
@@ -234,9 +246,9 @@
           <div class="section-heading compact"><div><span class="section-label">Public on-chain identity</span><h2>My profile</h2><p>Your display name helps participants recognise this wallet.</p></div></div>
           <div class="content-grid profile-grid">
             <form id="displayNameForm" class="panel form-panel"><h3>Display name</h3><label>Name or company<input id="displayNameInput" type="text" maxlength="64" placeholder="Example Logistics"></label><button class="button button-primary" type="submit">Save name</button></form>
-            <article class="panel reputation-card"><span class="section-label">Reputation token</span><strong id="reputationStars">☆☆☆☆☆</strong><h3 id="reputationPoints">0 points</h3><p>Completed deliveries mint reputation tokens to carriers.</p></article>
+            <article class="panel reputation-card carrier-only"><span class="section-label">Carrier reputation</span><strong id="reputationStars">☆☆☆☆☆</strong><h3 id="reputationPoints">0 points</h3><div class="reputation-breakdown"><span>Completed deliveries <b id="completionReputation">0</b></span><span>Resolved disputes <b id="disputeReputation">0</b></span></div><p>Only carriers receive reputation: after successful delivery or a dispute ruling in their favour.</p></article>
             <form id="carrierProfileForm" class="panel form-panel carrier-only"><h3>Carrier service profile</h3><label>Primary location<select id="profileLocation"></select></label><fieldset><legend>Delivery types</legend><label class="check-label"><input name="deliveryType" type="checkbox" value="1">Standard</label><label class="check-label"><input name="deliveryType" type="checkbox" value="2">Express</label><label class="check-label"><input name="deliveryType" type="checkbox" value="4">Same day</label></fieldset><button class="button button-primary" type="submit">Save carrier profile</button></form>
-            <article id="backendNotice" class="panel compatibility-card"><span class="section-label">Integration status</span><h3>Contract capability check</h3><p id="backendCapabilityText">Checking deployed ABI…</p></article>
+            <article id="backendNotice" class="panel compatibility-card arbitrator-only"><span class="section-label">Integration status</span><h3>Contract capability check</h3><p id="backendCapabilityText">Checking deployed ABI…</p></article>
           </div>
         </section>
       </div>
@@ -257,6 +269,12 @@
       <div id="actionFields"></div>
       <div class="dialog-actions"><button class="button button-secondary" type="button" data-close-action-dialog>Cancel</button><button id="actionSubmit" class="button button-primary" type="submit">Confirm</button></div>
     </form>
+  </dialog>
+
+  <dialog id="photoLightbox" class="photo-lightbox">
+    <button class="dialog-close" type="button" data-close-photo-lightbox aria-label="Close enlarged photo">×</button>
+    <img id="photoLightboxImage" alt="Selected parcel photo enlarged">
+    <p id="photoLightboxCaption"></p>
   </dialog>
 
   <div id="transactionOverlay" class="transaction-overlay hidden" role="status" aria-live="polite">

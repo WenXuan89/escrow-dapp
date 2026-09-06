@@ -97,6 +97,8 @@ contract Escrow {
     uint256 public arbitratorEarnings;
     uint256 public completionReward = 100;
     uint256 public disputeWinReward = 100;
+    mapping(address => uint256) public completionReputationEarned;
+    mapping(address => uint256) public disputeReputationEarned;
 
     /* =========
      * EVENTS
@@ -237,6 +239,7 @@ contract Escrow {
 
         require(details.origin >= 1 && details.origin <= 15, "Invalid origin");
         require(details.destination >= 1 && details.destination <= 15, "Invalid destination");
+        require(details.origin != details.destination, "Origin and destination must differ");
         require(details.itemType >= 1 && details.itemType <= 6, "Invalid item type");
         require(details.size >= 1 && details.size <= 4, "Invalid size");
         require(details.weight > 0, "Weight must be greater than zero");
@@ -270,7 +273,7 @@ contract Escrow {
                 milestonePercentages[i] > 0,
                 "Milestone percentage must be greater than zero"
             );
-            
+
             if (milestoneTypes[i] == 6) {
                 require(
                     bytes(milestoneOtherDescriptions[i]).length > 0,
@@ -472,6 +475,7 @@ contract Escrow {
             "Agreement is closed"
         );
         require(newDeadline > agreement.deadline, "New deadline must be later");
+        require(newDeadline > block.timestamp, "New deadline must be in the future");
 
         agreement.deadline = newDeadline;
 
@@ -549,6 +553,8 @@ contract Escrow {
 
         if (allCompleted) {
             agreement.status = AgreementStatus.Completed;
+
+            completionReputationEarned[agreement.carrier] += completionReward;
 
             reputationToken.mint(
                 agreement.carrier,
@@ -675,6 +681,7 @@ contract Escrow {
                 emit CommissionCollected(agreementId, commission);
             }
 
+            disputeReputationEarned[agreement.carrier] += disputeWinReward;
             reputationToken.mint(agreement.carrier, disputeWinReward);
 
             emit DisputeResolved(agreementId, "Dispute resolved: Remaining funds paid to carrier");
@@ -682,11 +689,13 @@ contract Escrow {
     }
 
     function setCompletionReward(uint256 newReward) public onlyArbitrator {
+        require(newReward > 0, "Completion reward must be greater than zero");
         completionReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }
 
     function setDisputeWinReward(uint256 newReward) public onlyArbitrator {
+        require(newReward > 0, "Dispute reward must be greater than zero");
         disputeWinReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }
