@@ -209,7 +209,12 @@
               <label>Weight (kg)<input id="weight" name="weight" type="number" min="0.01" step="0.01" value="1" required></label>
               <label>Delivery speed<select id="deliverySpeed" name="deliverySpeed" required><option value="1">Standard</option><option value="2">Express</option><option value="3">Same day</option><option value="4">Scheduled</option></select></label>
               <label>Guarantee tier<select id="guaranteeTier" name="guaranteeTier" required><option value="1">Basic</option><option value="2">Protected</option><option value="3">Premium</option></select></label>
-              <label>Parcel photo CID (optional)<input id="photoCID" name="photoCID" type="text" placeholder="bafy…"></label>
+              <div class="image-input-card full-field" data-image-input>
+                <div><strong>Parcel photo (optional)</strong><small>Choose a photo for preview, then enter its IPFS CID or image URL to save it on-chain.</small></div>
+                <label class="file-button">Choose photo<input id="parcelPhotoFile" type="file" accept="image/*" data-image-file></label>
+                <label>IPFS CID or image URL<input id="photoCID" name="photoCID" type="text" placeholder="bafy… or https://…" data-image-cid></label>
+                <figure class="image-preview hidden" data-image-preview-wrap><img alt="Parcel preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure>
+              </div>
               <label>Total value (ETH)<input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="0.015" required><small id="priceSuggestion" class="field-help">Suggested price appears as shipment details change.</small></label>
               <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required></label>
             </div>
