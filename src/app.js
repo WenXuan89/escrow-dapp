@@ -279,6 +279,20 @@ function configureDashboardForRole() {
   $("#activeFilterButton").textContent = isArbitrator ? "Active" : "Active";
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
+  state.filter = "all";
+  $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
+
+  // Restore the participant dashboard labels whenever MetaMask changes from
+  // the arbitrator account to a shipper or carrier account.
+  $("#statOneLabel").textContent = "Wallet balance";
+  $("#statOneHelp").textContent = "Connected account";
+  $("#statTwoLabel").textContent = "Locked in my escrows";
+  $("#statTwoHelp").textContent = "Funded minus released";
+  $("#statThreeLabel").textContent = "Active agreements";
+  $("#statThreeHelp").textContent = "Funded or in progress";
+  $("#statFourLabel").textContent = "Completed";
+  $("#statFourHelp").textContent = "Successfully settled";
+
   if (isArbitrator) {
     $("#statOneLabel").textContent = "Active agreements";
     $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
@@ -486,7 +500,8 @@ function needsAttention(agreement) {
 }
 
 function renderDashboard() {
-  const active = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
+  const open = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
+  const active = state.agreements.filter(agreement => ACTIVE_STATUSES.includes(agreement.status));
   const completed = state.agreements.filter(agreement => agreement.status === 3);
   const activeDisputes = state.agreements.filter(agreement => agreement.status === 5);
   const resolvedDisputes = state.agreements.filter(agreement => agreement.disputeReason > 0 && agreement.status !== 5);
@@ -495,7 +510,7 @@ function renderDashboard() {
     return sum + BigInt(escrowRemaining(agreement));
   }, state.demo ? 0 : 0n);
   if (state.role === ROLE.ARBITRATOR) {
-    $("#walletBalance").textContent = active.length;
+    $("#walletBalance").textContent = open.length;
     $("#escrowBalance").textContent = activeDisputes.length;
     $("#activeCount").textContent = completed.length;
     $("#completedCount").textContent = resolvedDisputes.length;
@@ -1178,6 +1193,7 @@ async function init() {
       state.account = accounts[0] || null;
       state.contract = null;
       state.agreements = [];
+      state.currentAgreementId = null;
       updateWalletHeader();
       if (state.account) connectWallet(false); else showView("landingView");
     });
