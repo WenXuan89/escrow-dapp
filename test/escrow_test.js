@@ -8,6 +8,18 @@ const MILESTONE_OTHER = 6;
 // Dispute reason codes
 const DISPUTE_OTHER = 5;
 
+// Default AgreementDetails struct used by tests that don't care about its contents
+const DEFAULT_DETAILS = {
+  origin: 1,
+  destination: 2,
+  itemType: 1,
+  size: 1,
+  weight: 1000,
+  deliverySpeed: 1,
+  guaranteeTier: 1,
+  photoCID: ''
+};
+
 // Helper: fast-forward the local test chain past a deadline
 async function increaseTime(seconds) {
   await new Promise((resolve, reject) => {
@@ -119,6 +131,7 @@ contract('Escrow + ReputationToken', (accounts) => {
         [MILESTONE_PICKUP, MILESTONE_OTHER],
         ['', 'Customs clearance'],
         [40, 60],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
       assert.equal((await escrow.agreementCount()).toString(), '1');
@@ -151,6 +164,7 @@ contract('Escrow + ReputationToken', (accounts) => {
         [MILESTONE_PICKUP],
         [''],
         [100],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
 
@@ -162,6 +176,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       [MILESTONE_PICKUP],
       [''],
       [100],
+      DEFAULT_DETAILS,
       { from: shipper }
     );
 
@@ -198,6 +213,7 @@ contract('Escrow + ReputationToken', (accounts) => {
           [MILESTONE_OTHER],
           [''],
           [100],
+          DEFAULT_DETAILS,
           { from: shipper }
         ),
         'Other description required'
@@ -214,6 +230,7 @@ contract('Escrow + ReputationToken', (accounts) => {
           [7], // invalid: must be 1-6
           [''],
           [100],
+          DEFAULT_DETAILS,
           { from: shipper }
         ),
         'Invalid milestone type'
@@ -230,6 +247,7 @@ contract('Escrow + ReputationToken', (accounts) => {
           [MILESTONE_PICKUP, MILESTONE_PICKUP],
           ['', ''],
           [40, 50],
+          DEFAULT_DETAILS,
           { from: shipper }
         ),
         'must sum to 100'
@@ -246,6 +264,7 @@ contract('Escrow + ReputationToken', (accounts) => {
           [MILESTONE_PICKUP],
           [''],
           [100],
+          DEFAULT_DETAILS,
           { from: shipper }
         ),
         'must be different addresses'
@@ -262,6 +281,7 @@ contract('Escrow + ReputationToken', (accounts) => {
           [MILESTONE_PICKUP],
           [''],
           [100],
+          DEFAULT_DETAILS,
           { from: shipper }
         ),
         'not a registered Carrier'
@@ -281,6 +301,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.createAgreement(
         carrier, total, deadline,
         [MILESTONE_PICKUP, MILESTONE_PICKUP], ['', ''], [50, 50],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
       agreementId = 0;
@@ -320,6 +341,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.createAgreement(
         carrier, total, deadline,
         [MILESTONE_PICKUP, MILESTONE_PICKUP], ['', ''], [40, 60],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
       agreementId = 0;
@@ -399,6 +421,7 @@ contract('Escrow + ReputationToken', (accounts) => {
         [MILESTONE_PICKUP],
         [''],
         [100],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
 
@@ -442,6 +465,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.createAgreement(
         carrier, total, deadline,
         [MILESTONE_PICKUP], [''], [100],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
       await escrow.fundAgreement(0, { from: shipper, value: total });
@@ -470,6 +494,7 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.createAgreement(
         carrier, total, deadline,
         [MILESTONE_PICKUP], [''], [100],
+        DEFAULT_DETAILS,
         { from: shipper }
       );
       agreementId = 0;

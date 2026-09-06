@@ -687,6 +687,7 @@ function updateImagePreview(input) {
   const card = input.closest("[data-image-input]");
   if (!card) return;
   const preview = $("[data-image-preview]", card); const wrap = $("[data-image-preview-wrap]", card); const caption = $("[data-image-caption]", card);
+  delete preview.dataset.fallback;
   if (input.matches("[data-image-file]")) {
     const file = input.files?.[0];
     if (!file) return;
@@ -977,7 +978,7 @@ function bindEvents() {
   document.addEventListener("input", event => { if (event.target.matches("[data-image-cid]")) updateImagePreview(event.target); });
   document.addEventListener("change", event => { if (event.target.matches("[data-image-file]")) updateImagePreview(event.target); });
   document.addEventListener("error", event => {
-    if (!event.target.matches?.("[data-proof-image]") || event.target.dataset.fallback) return;
+    if (!event.target.matches?.("[data-proof-image], [data-image-preview]") || event.target.dataset.fallback) return;
     event.target.dataset.fallback = "1";
     event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
   }, true);
