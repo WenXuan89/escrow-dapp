@@ -2,7 +2,7 @@
 
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
-const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
+const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed", "Accepted", "Rejected"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
 const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
@@ -11,7 +11,8 @@ const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
 const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day", "Scheduled"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
 const ACTIVE_STATUSES = [1, 2];
-const CLOSED_STATUSES = [3, 4];
+const OPEN_STATUSES = [0, 1, 2, 6];
+const CLOSED_STATUSES = [3, 4, 7];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const state = {
@@ -22,6 +23,7 @@ const state = {
   token: null,
   account: null,
   chainId: null,
+  networkId: null,
   role: ROLE.NONE,
   isArbitrator: false,
   agreements: [],
@@ -58,11 +60,11 @@ function formatEth(wei, precision = 4) {
 }
 
 function statusClass(status) {
-  return `status-${STATUS[status].toLowerCase().replace(/\s+/g, "")}`;
+  return `status-${(STATUS[status] || "Unknown").toLowerCase().replace(/\s+/g, "")}`;
 }
 
 function statusPill(status) {
-  return `<span class="status-pill ${statusClass(status)}">${escapeHtml(STATUS[status])}</span>`;
+  return `<span class="status-pill ${statusClass(status)}">${escapeHtml(STATUS[status] || `Unknown (${status})`)}</span>`;
 }
 
 function avatarColor(address) {
@@ -177,7 +179,10 @@ async function connectWallet(requestAccess = true) {
     if (!accounts.length) return;
     state.web3 = new Web3(window.ethereum);
     state.account = accounts[0];
-    state.chainId = Number(await state.web3.eth.getChainId());
+    [state.chainId, state.networkId] = await Promise.all([
+      state.web3.eth.getChainId().then(Number),
+      state.web3.eth.net.getId().then(Number)
+    ]);
     updateWalletHeader();
     await initializeContract();
   } catch (error) {
@@ -193,11 +198,9 @@ async function initializeContract(manualAddress = null) {
       state.artifact = await response.json();
     }
 
-    console.log("chainId =", state.chainId);
-    console.log("Escrow networks =", state.artifact.networks);
-
-    const savedAddress = localStorage.getItem(`escrowAddress:${state.chainId}`);
-    const deployed = state.artifact.networks?.[String(state.chainId)]?.address;
+    const deploymentKey = state.networkId ?? state.chainId;
+    const savedAddress = localStorage.getItem(`escrowAddress:${deploymentKey}`) || localStorage.getItem(`escrowAddress:${state.chainId}`);
+    const deployed = state.artifact.networks?.[String(deploymentKey)]?.address || state.artifact.networks?.[String(state.chainId)]?.address;
     const address = manualAddress || savedAddress || deployed;
     if (!address || !state.web3.utils.isAddress(address) || address === ZERO_ADDRESS) {
       showSetup("No Escrow deployment was found for the connected network.");
@@ -217,7 +220,7 @@ async function initializeContract(manualAddress = null) {
       const tokenAddress = await state.contract.methods.reputationToken().call();
       if (state.tokenArtifact?.abi && tokenAddress !== ZERO_ADDRESS) state.token = new state.web3.eth.Contract(state.tokenArtifact.abi, tokenAddress);
     } catch (_) { state.token = null; }
-    localStorage.setItem(`escrowAddress:${state.chainId}`, address);
+    localStorage.setItem(`escrowAddress:${deploymentKey}`, address);
     $("#contractAddressShort").textContent = shortAddress(address, 8, 6);
     await routeConnectedUser();
   } catch (error) {
@@ -425,14 +428,15 @@ function completedMilestones(agreement) {
 
 function needsAttention(agreement) {
   if (agreement.status === 5) return true;
-  if (state.role === ROLE.SHIPPER && agreement.status === 0) return true;
+  if (state.role === ROLE.CARRIER && agreement.status === 0) return true;
+  if (state.role === ROLE.SHIPPER && agreement.status === 6) return true;
   if (state.role === ROLE.SHIPPER && agreement.milestones.some(milestone => milestone.reported && !milestone.completed)) return true;
   if (state.role === ROLE.CARRIER && ACTIVE_STATUSES.includes(agreement.status) && agreement.milestones.some(milestone => !milestone.reported)) return true;
   return ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
 }
 
 function renderDashboard() {
-  const active = state.agreements.filter(agreement => ACTIVE_STATUSES.includes(agreement.status));
+  const active = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
   const completed = state.agreements.filter(agreement => agreement.status === 3);
   const totalEscrow = state.agreements.reduce((sum, agreement) => {
     if (state.demo) return sum + escrowRemaining(agreement);
@@ -478,7 +482,7 @@ function agreementMatchesFilter(agreement) {
     if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 5;
     if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 5;
   } else {
-    if (state.filter === "active") matchesStatus = ACTIVE_STATUSES.includes(agreement.status);
+    if (state.filter === "active") matchesStatus = OPEN_STATUSES.includes(agreement.status);
     if (state.filter === "attention") matchesStatus = needsAttention(agreement);
     if (state.filter === "closed") matchesStatus = CLOSED_STATUSES.includes(agreement.status);
   }
@@ -493,7 +497,7 @@ function agreementMatchesFilter(agreement) {
 function renderAgreementGrid() {
   const container = $("#agreementGrid");
   const agreements = state.agreements.filter(agreementMatchesFilter).sort((a, b) => {
-    const activeA = ACTIVE_STATUSES.includes(a.status); const activeB = ACTIVE_STATUSES.includes(b.status);
+    const activeA = OPEN_STATUSES.includes(a.status); const activeB = OPEN_STATUSES.includes(b.status);
     if (activeA !== activeB) return activeA ? -1 : 1;
     return activeA ? a.deadline - b.deadline : b.id - a.id;
   });
@@ -635,9 +639,6 @@ async function createAgreement(event) {
   try {
     const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
     if (!receipt) return;
-    const createdEvent = receipt.events?.AgreementCreated;
-    const agreementId = Number(createdEvent?.returnValues?.agreementId ?? createdEvent?.returnValues?.[0] ?? (await state.contract.methods.agreementCount().call()) - 1);
-    if ($("#fundImmediately").checked) await sendTransaction(state.contract.methods.fundAgreement(agreementId), { value: totalValue }, "Fund agreement");
     event.target.reset();
     $("#selectedCarrier").value = "";
     $("#milestoneRows").innerHTML = "";
@@ -751,7 +752,11 @@ function renderAgreementDetail(agreement) {
       <div class="timeline">${events.length ? events.map(event => `<div class="timeline-event"><strong>${escapeHtml(event.title)}</strong><span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span></div>`).join("") : `<div class="timeline-event"><strong>No milestone activity yet</strong><span>Reports and verifications will appear here.</span></div>`}</div>
       ${agreement.status === 5 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>Participants can attach a description and optional IPFS CID.</div>`}</div>` : ""}
       <div class="detail-actions">
-        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
+        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `<button class="button button-primary" type="button" data-action="accept">Accept agreement</button><button class="button button-danger" type="button" data-action="reject">Reject agreement</button>` : ""}
+        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>` : ""}
+        ${agreement.status === 6 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
+        ${agreement.status === 6 && state.role === ROLE.CARRIER ? `<span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>` : ""}
+        ${agreement.status === 7 ? `<span class="action-note">This agreement was rejected and cannot be funded.</span>` : ""}
         ${canDispute ? `<button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>` : ""}
         ${canRefund ? `<button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>` : ""}
         ${agreement.status === 5 && isParticipant ? `<button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>` : ""}
@@ -793,6 +798,8 @@ async function handleDetailAction(action, milestoneIndex) {
   if (["report", "dispute", "evidence"].includes(action)) return openActionDialog(action, milestoneIndex);
   if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
   try {
+    if (action === "accept" && confirm("Accept this delivery agreement? The shipper will then be able to fund it.")) await sendTransaction(state.contract.methods.acceptAgreement(agreement.id), {}, "Accept agreement");
+    if (action === "reject" && confirm("Reject this delivery agreement? It cannot be funded afterwards.")) await sendTransaction(state.contract.methods.rejectAgreement(agreement.id), {}, "Reject agreement");
     if (action === "fund") await sendTransaction(state.contract.methods.fundAgreement(agreement.id), { value: agreement.totalValue }, "Fund agreement");
     if (action === "verify" && confirm("Verify this milestone and release its payout to the carrier?")) await sendTransaction(state.contract.methods.verifyMilestone(agreement.id, milestoneIndex), {}, "Verify milestone");
     if (action === "refund" && confirm("Claim the remaining escrow balance for the shipper?")) await sendTransaction(state.contract.methods.checkAndRefund(agreement.id), {}, "Claim refund");
@@ -846,6 +853,7 @@ function seedDemo() {
   const now = Math.floor(Date.now() / 1000);
   state.account = "0x7D44E39B5Fc66F4D89A0f41e486cF28a73915A80";
   state.chainId = 1337;
+  state.networkId = 5777;
   state.role = ROLE.SHIPPER;
   state.isArbitrator = false;
   state.carriers = [
