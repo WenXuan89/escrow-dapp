@@ -15,6 +15,8 @@ const OPEN_STATUSES = [0, 1, 2, 6];
 const CLOSED_STATUSES = [3, 4, 7];
 const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+const PINATA_GATEWAY = 'https://gateway.pinata.cloud/ipfs/'
 
 const state = {
   web3: null,
@@ -54,6 +56,106 @@ const shortAddress = (address, head = 6, tail = 4) => address ? `${address.slice
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
+
+async function uploadToPinata(file) {
+    try {
+        let token = localStorage.getItem('pinata_jwt');
+        
+        if (!token) {
+            showToast('Please set your Pinata API key first.', 'error');
+            showPinataSetupUI();
+            return null;
+        }
+        
+        showToast('Uploading to Pinata (IPFS)...', 'info');
+        
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Pinata upload failed: ${response.status} - ${error}`);
+        }
+
+        const result = await response.json();
+        const cid = result.IpfsHash;
+        
+        console.log('Uploaded to Pinata:', cid);
+        console.log('View at:', `${PINATA_GATEWAY}${cid}`);
+        
+        showToast(`Uploaded: ${cid.substring(0, 16)}...`, 'success');
+        return cid;
+        
+    } catch (error) {
+        console.error('Pinata upload failed:', error);
+        showToast('Pinata upload failed. Proceeding without photo.', 'error');
+        return null;
+    }
+}
+
+function showPinataSetupUI() {
+    if (document.querySelector('.pinata-setup-overlay')) {
+        return;
+    }
+    
+    const currentToken = localStorage.getItem('pinata_jwt') || '';
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'pinata-setup-overlay';
+    overlay.innerHTML = `
+        <div class="pinata-setup-modal">
+            <h3>Pinata API Key Setup</h3>
+            <p>Get your free API key from <a href="https://pinata.cloud/" target="_blank" rel="noopener">pinata.cloud</a></p>
+            <p style="font-size:12px;color:var(--muted);">Free tier: 1GB storage · 100k requests/day</p>
+            <input type="password" id="pinataTokenInput" placeholder="Paste your JWT token here..." value="${currentToken}">
+            <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap;">
+                <button id="pinataSaveBtn" class="button button-primary">Save API Key</button>
+                <button id="pinataSkipBtn" class="button button-secondary">Skip (no photos)</button>
+                <button id="pinataCloseBtn" class="button" style="background:transparent;border-color:transparent;">×</button>
+            </div>
+            <div id="pinataStatus" style="margin-top:0.75rem;font-size:0.875rem;"></div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    document.getElementById('pinataSaveBtn').addEventListener('click', function() {
+        const token = document.getElementById('pinataTokenInput').value.trim();
+        if (token && token.length > 10) {
+            localStorage.setItem('pinata_jwt', token);
+            document.getElementById('pinataStatus').textContent = 'API key saved successfully!';
+            document.getElementById('pinataStatus').style.color = '#2e7d32';
+            setTimeout(() => {
+                overlay.remove();
+                showToast('Pinata API key saved!', 'success');
+            }, 1000);
+        } else {
+            document.getElementById('pinataStatus').textContent = 'Please paste a valid JWT token.';
+            document.getElementById('pinataStatus').style.color = '#c62828';
+        }
+    });
+    
+    document.getElementById('pinataSkipBtn').addEventListener('click', function() {
+        overlay.remove();
+        showToast('Skipping photo upload. You can add it later.', 'info');
+    });
+    
+    document.getElementById('pinataCloseBtn').addEventListener('click', function() {
+        overlay.remove();
+    });
+    
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) overlay.remove();
+    });
+}
 
 function deadlineLocalDate(deadline) {
   const timestamp = Number(deadline);
@@ -785,38 +887,75 @@ function updatePriceSuggestion(fillIfEmpty = false) {
 }
 
 async function createAgreement(event) {
-  event.preventDefault();
-  if (state.demo) return showToast("Creation is disabled in preview mode.", "error");
-  const carrier = $("#selectedCarrier").value;
-  const ethValue = $("#totalValue").value;
-  const deadline = Math.floor(new Date($("#deadline").value).getTime() / 1000);
-  const rows = $$(".milestone-form-row");
-  const types = rows.map(row => Number($(".milestone-type", row).value));
-  const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
-  const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
-  const details = [Number($("#origin").value), Number($("#destination").value), Number($("#itemType").value), Number($("#parcelSize").value), String(Math.round(Number($("#weight").value) * 1000)), Number($("#deliverySpeed").value), Number($("#guaranteeTier").value), ""];
-  if (!carrier) return showToast("Select a registered carrier.", "error");
-  if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
-  if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
-  if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
-  if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
-  if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
-  if (details[0] === details[1]) return showToast("Origin and destination must be different.", "error");
-  if (Number(details[4]) <= 0) return showToast("Weight must be greater than zero.", "error");
-  const totalValue = state.web3.utils.toWei(ethValue, "ether");
-  try {
-    const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
-    if (!receipt) return;
-    event.target.reset();
-    clearParcelPhotos();
-    $("#selectedCarrier").value = "";
-    $("#milestoneRows").innerHTML = "";
-    addMilestoneRow(1, 30);
-    addMilestoneRow(5, 70);
-    setDefaultDeadline();
-    updatePriceSuggestion(true);
-    showSection("agreementsSection");
-  } catch (_) { /* sendTransaction already reports the reason */ }
+    event.preventDefault();
+    if (state.demo) return showToast("Creation is disabled in preview mode.", "error");
+    
+    const carrier = $("#selectedCarrier").value;
+    const ethValue = $("#totalValue").value;
+    const deadline = Math.floor(new Date($("#deadline").value).getTime() / 1000);
+    const rows = $$(".milestone-form-row");
+    const types = rows.map(row => Number($(".milestone-type", row).value));
+    const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
+    const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
+    
+    if (!carrier) return showToast("Select a registered carrier.", "error");
+    if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
+    if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
+    if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
+    if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
+    if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
+    if (Number($("#origin").value) === Number($("#destination").value)) return showToast("Origin and destination must be different.", "error");
+    if (Number($("#weight").value) <= 0) return showToast("Weight must be greater than zero.", "error");
+    
+    let photoCID = "";
+    if (state.parcelPhotos.length > 0) {
+        setTransactionState(true, "Uploading parcel photo to Pinata", "This may take a few seconds...");
+        try {
+            const file = state.parcelPhotos[0].file;
+            photoCID = await uploadToPinata(file);
+            if (photoCID) {
+                console.log('Parcel photo uploaded:', photoCID);
+                showToast(`Parcel photo uploaded: ${photoCID.substring(0, 12)}...`, 'success');
+            }
+        } catch (error) {
+            console.error('Photo upload failed:', error);
+            showToast('Photo upload failed. Proceeding without photo.', 'error');
+            photoCID = "";
+        } finally {
+            setTransactionState(false);
+        }
+    }
+    
+    const details = [
+        Number($("#origin").value),
+        Number($("#destination").value),
+        Number($("#itemType").value),
+        Number($("#parcelSize").value),
+        String(Math.round(Number($("#weight").value) * 1000)),
+        Number($("#deliverySpeed").value),
+        Number($("#guaranteeTier").value),
+        photoCID
+    ];
+    
+    const totalValue = state.web3.utils.toWei(ethValue, "ether");
+    
+    try {
+        const receipt = await sendTransaction(
+            state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details),
+            {},
+            "Create agreement"
+        );
+        if (!receipt) return;
+        event.target.reset();
+        clearParcelPhotos();
+        $("#selectedCarrier").value = "";
+        $("#milestoneRows").innerHTML = "";
+        addMilestoneRow(1, 30);
+        addMilestoneRow(5, 70);
+        setDefaultDeadline();
+        updatePriceSuggestion(true);
+        showSection("agreementsSection");
+    } catch (_) { /* sendTransaction already reports the reason */ }
 }
 
 async function openAgreement(id, showModal = true) {
@@ -1045,36 +1184,142 @@ async function handleDetailAction(action, milestoneIndex) {
 }
 
 async function submitAction(event) {
-  event.preventDefault();
-  const data = new FormData(event.target);
-  const { action, agreementId, milestoneIndex } = state.pendingAction || {};
-  if (state.demo) {
-    $("#actionDialog").close();
-    return showToast("Transactions are disabled in preview mode.", "error");
-  }
-  try {
-    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex, ""), {}, "Report milestone");
-    if (action === "extend") {
-      const agreement = state.agreements.find(item => item.id === Number(agreementId));
-      const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
-      if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) return showToast("Choose a deadline later than the current deadline.", "error");
-      await sendTransaction(state.contract.methods.extendDeadline(agreementId, newDeadline), {}, "Extend deadline");
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const { action, agreementId, milestoneIndex } = state.pendingAction || {};
+    
+    if (state.demo) {
+        $("#actionDialog").close();
+        return showToast("Transactions are disabled in preview mode.", "error");
     }
-    if (action === "dispute") {
-      const reason = Number(data.get("reason"));
-      const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
-      const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
-      if (reason === 5 && !otherReason) return showToast("Enter the other dispute reason.", "error");
-      await sendTransaction(state.contract.methods.raiseDispute(agreementId, reason, otherReason), {}, "Raise dispute");
-      if (evidenceDescription) await sendTransaction(state.contract.methods.submitEvidence(agreementId, evidenceDescription, ""), {}, "Submit dispute evidence");
+    
+    try {
+        if (action === "report") {
+            let proofCID = "";
+            const fileInput = document.querySelector('[name="proofCID"]');
+
+            if (fileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading proof to Pinata", "Uploading milestone proof photo...");
+                try {
+                    proofCID = await uploadToPinata(fileInput.files[0]);
+                    if (proofCID) {
+                        console.log('Milestone proof uploaded:', proofCID);
+                        showToast(`Proof uploaded: ${proofCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Proof upload failed:', error);
+                    showToast('Proof photo upload failed. Proceeding without photo.', 'error');
+                    proofCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            await sendTransaction(
+                state.contract.methods.reportMilestone(agreementId, milestoneIndex, proofCID),
+                {},
+                "Report milestone"
+            );
+        }
+
+        if (action === "extend") {
+            const agreement = state.agreements.find(item => item.id === Number(agreementId));
+            const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
+            if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) {
+                return showToast("Choose a deadline later than the current deadline.", "error");
+            }
+            await sendTransaction(
+                state.contract.methods.extendDeadline(agreementId, newDeadline),
+                {},
+                "Extend deadline"
+            );
+        }
+        
+        if (action === "dispute") {
+            const reason = Number(data.get("reason"));
+            const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
+            const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
+            
+            let evidenceCID = "";
+            const evidenceFileInput = document.querySelector('[name="evidenceCID"]');
+            
+            if (evidenceFileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading evidence to Pinata", "Uploading dispute evidence photo...");
+                try {
+                    evidenceCID = await uploadToPinata(evidenceFileInput.files[0]);
+                    if (evidenceCID) {
+                        console.log('Evidence uploaded:', evidenceCID);
+                        showToast(`Evidence uploaded: ${evidenceCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Evidence upload failed:', error);
+                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    evidenceCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            if (reason === 5 && !otherReason) {
+                return showToast("Enter the other dispute reason.", "error");
+            }
+            
+            await sendTransaction(
+                state.contract.methods.raiseDispute(agreementId, reason, otherReason),
+                {},
+                "Raise dispute"
+            );
+            
+            if (evidenceDescription || evidenceCID) {
+                await sendTransaction(
+                    state.contract.methods.submitEvidence(
+                        agreementId,
+                        evidenceDescription || "Evidence submitted",
+                        evidenceCID
+                    ),
+                    {},
+                    "Submit dispute evidence"
+                );
+            }
+        }
+
+        if (action === "evidence") {
+            const description = String(data.get("description") || "").trim();
+            if (!description) {
+                return showToast("Evidence description is required.", "error");
+            }
+            
+            let fileCID = "";
+            const fileInput = document.querySelector('[name="fileCID"]');
+
+            if (fileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading evidence to Pinata", "Uploading evidence photo...");
+                try {
+                    fileCID = await uploadToPinata(fileInput.files[0]);
+                    if (fileCID) {
+                        console.log('Evidence uploaded:', fileCID);
+                        showToast(`Evidence uploaded: ${fileCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Evidence upload failed:', error);
+                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    fileCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            await sendTransaction(
+                state.contract.methods.submitEvidence(agreementId, description, fileCID),
+                {},
+                "Submit evidence"
+            );
+        }
+        
+        $("#actionDialog").close();
+        
+    } catch (_) {
     }
-    if (action === "evidence") {
-      const description = String(data.get("description") || "").trim();
-      if (!description) return showToast("Evidence description is required.", "error");
-      await sendTransaction(state.contract.methods.submitEvidence(agreementId, description, ""), {}, "Submit evidence");
-    }
-    $("#actionDialog").close();
-  } catch (_) { /* already surfaced */ }
 }
 
 async function registerRole(role) {

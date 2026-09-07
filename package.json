@@ -31,6 +31,7 @@
     "truffle": "^5.11.5"
   },
   "dependencies": {
+    "ipfs-http-client": "^60.0.1",
     "web3": "^1.10.4"
   }
 }
