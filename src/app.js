@@ -1,5 +1,4 @@
-/* global Web3 */
-
+import { PINATA_JWT } from './config.js';
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
 const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed", "Accepted", "Rejected"];
@@ -16,7 +15,6 @@ const CLOSED_STATUSES = [3, 4, 7];
 const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
-const PINATA_GATEWAY = 'https://gateway.pinata.cloud/ipfs/'
 
 const state = {
   web3: null,
@@ -57,104 +55,59 @@ const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
 
-async function uploadToPinata(file) {
+async function uploadToIPFS(file) {
+    if (!file) {
+        console.warn('No file provided to uploadToIPFS');
+        return null;
+    }
+    
     try {
-        let token = localStorage.getItem('pinata_jwt');
-        
-        if (!token) {
-            showToast('Please set your Pinata API key first.', 'error');
-            showPinataSetupUI();
-            return null;
-        }
-        
-        showToast('Uploading to Pinata (IPFS)...', 'info');
+        showToast('Uploading to IPFS...', 'info');
         
         const formData = new FormData();
         formData.append('file', file);
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
         const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${token}`,
+                'Authorization': `Bearer ${PINATA_JWT}`  // ← Uses imported key
             },
-            body: formData
+            body: formData,
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Pinata upload failed: ${response.status} - ${error}`);
+            const errorText = await response.text();
+            throw new Error(`Upload failed: ${response.status} - ${errorText}`);
         }
 
         const result = await response.json();
-        const cid = result.IpfsHash;
+        const cid = result.IpfsHash || result.Hash || result.cid?.['/'] || result.cid?.toString();
         
-        console.log('Uploaded to Pinata:', cid);
-        console.log('View at:', `${PINATA_GATEWAY}${cid}`);
+        if (!cid) {
+            throw new Error('No CID returned from IPFS');
+        }
+
+        console.log('Uploaded to IPFS:', cid);
+        console.log('View at:', `${IPFS_GATEWAY}${cid}`);
         
         showToast(`Uploaded: ${cid.substring(0, 16)}...`, 'success');
         return cid;
         
     } catch (error) {
-        console.error('Pinata upload failed:', error);
-        showToast('Pinata upload failed. Proceeding without photo.', 'error');
+        console.error('IPFS upload failed:', error);
+        if (error.name === 'AbortError') {
+            showToast('Upload timed out. Proceeding without photo.', 'error');
+        } else {
+            showToast('Upload failed. Proceeding without photo.', 'error');
+        }
         return null;
     }
-}
-
-function showPinataSetupUI() {
-    if (document.querySelector('.pinata-setup-overlay')) {
-        return;
-    }
-    
-    const currentToken = localStorage.getItem('pinata_jwt') || '';
-    
-    const overlay = document.createElement('div');
-    overlay.className = 'pinata-setup-overlay';
-    overlay.innerHTML = `
-        <div class="pinata-setup-modal">
-            <h3>Pinata API Key Setup</h3>
-            <p>Get your free API key from <a href="https://pinata.cloud/" target="_blank" rel="noopener">pinata.cloud</a></p>
-            <p style="font-size:12px;color:var(--muted);">Free tier: 1GB storage · 100k requests/day</p>
-            <input type="password" id="pinataTokenInput" placeholder="Paste your JWT token here..." value="${currentToken}">
-            <div style="display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap;">
-                <button id="pinataSaveBtn" class="button button-primary">Save API Key</button>
-                <button id="pinataSkipBtn" class="button button-secondary">Skip (no photos)</button>
-                <button id="pinataCloseBtn" class="button" style="background:transparent;border-color:transparent;">×</button>
-            </div>
-            <div id="pinataStatus" style="margin-top:0.75rem;font-size:0.875rem;"></div>
-        </div>
-    `;
-    
-    document.body.appendChild(overlay);
-    
-    document.getElementById('pinataSaveBtn').addEventListener('click', function() {
-        const token = document.getElementById('pinataTokenInput').value.trim();
-        if (token && token.length > 10) {
-            localStorage.setItem('pinata_jwt', token);
-            document.getElementById('pinataStatus').textContent = 'API key saved successfully!';
-            document.getElementById('pinataStatus').style.color = '#2e7d32';
-            setTimeout(() => {
-                overlay.remove();
-                showToast('Pinata API key saved!', 'success');
-            }, 1000);
-        } else {
-            document.getElementById('pinataStatus').textContent = 'Please paste a valid JWT token.';
-            document.getElementById('pinataStatus').style.color = '#c62828';
-        }
-    });
-    
-    document.getElementById('pinataSkipBtn').addEventListener('click', function() {
-        overlay.remove();
-        showToast('Skipping photo upload. You can add it later.', 'info');
-    });
-    
-    document.getElementById('pinataCloseBtn').addEventListener('click', function() {
-        overlay.remove();
-    });
-    
-    overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) overlay.remove();
-    });
 }
 
 function deadlineLocalDate(deadline) {
@@ -824,8 +777,62 @@ function carrierCard(carrier, selectOnly = false) {
 }
 
 function matchingCarriersForForm() {
-  const origin = Number($("#origin")?.value || 0); const speed = Number($("#deliverySpeed")?.value || 0); const bit = speed <= 3 ? 2 ** (speed - 1) : 0;
-  return state.carriers.filter(carrier => !carrier.profile?.isSet || ((!origin || carrier.profile.location === origin) && (!bit || (carrier.profile.deliveryTypes & bit))));
+    const origin = Number($("#origin")?.value || 0);
+    const speed = Number($("#deliverySpeed")?.value || 0);
+    const bit = speed <= 3 ? 2 ** (speed - 1) : 0;
+    
+    return state.carriers.filter(carrier => {
+  
+        if (!carrier.profile?.isSet) return false;
+        
+        if (origin && carrier.profile.location !== origin) return false;
+        
+        if (bit && !(carrier.profile.deliveryTypes & bit)) return false;
+        
+        return true;
+    });
+}
+
+function getAvailableSpeedsForCarrier(carrierAddress) {
+    const carrier = state.carriers.find(c => c.address.toLowerCase() === carrierAddress.toLowerCase());
+    if (!carrier || !carrier.profile?.isSet) return [];
+    
+    const mask = carrier.profile.deliveryTypes;
+    const speeds = [];
+    if (mask & 1) speeds.push({ value: 1, label: "Standard" });
+    if (mask & 2) speeds.push({ value: 2, label: "Express" });
+    if (mask & 4) speeds.push({ value: 3, label: "Same day" });
+    return speeds;
+}
+
+function updateDeliverySpeedOptions() {
+    const carrierAddress = $("#selectedCarrier").value;
+    const speedSelect = $("#deliverySpeed");
+    const availableSpeeds = getAvailableSpeedsForCarrier(carrierAddress);
+    
+    speedSelect.innerHTML = '<option value="">Select speed...</option>';
+    
+    if (availableSpeeds.length === 0) {
+        speedSelect.innerHTML = '<option value="">No speeds available</option>';
+        return;
+    }
+    
+    availableSpeeds.forEach(speed => {
+        const option = document.createElement('option');
+        option.value = speed.value;
+        option.textContent = speed.label;
+        speedSelect.appendChild(option);
+    });
+}
+
+function selectCarrier(address) {
+    $("#selectedCarrier").value = address;
+    $$('[data-select-carrier]').forEach(node => node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase()));
+    
+    updateDeliverySpeedOptions();
+    
+    showSection("createSection");
+    showToast(`Selected ${shortAddress(address, 8, 6)}.`);
 }
 
 function renderMarketplace() {
@@ -838,13 +845,6 @@ function renderMarketplace() {
 function renderActivity() {
   const labels = { AgreementCreated: "Agreement created", AgreementAccepted: "Agreement accepted", AgreementRejected: "Agreement rejected", AgreementFunded: "Escrow funded", DeadlineExtended: "Deadline extended", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CommissionCollected: "Commission collected", CommissionWithdrawn: "Commission withdrawn", ReputationRewardsUpdated: "Reward settings updated", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
   $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>${event.timestamp ? formatDate(event.timestamp) + " · " : ""}Block ${event.blockNumber} · ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent activity</strong>New on-chain activity will appear here.</div>`;
-}
-
-function selectCarrier(address) {
-  $("#selectedCarrier").value = address;
-  $$('[data-select-carrier]').forEach(node => node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase()));
-  showSection("createSection");
-  showToast(`Selected ${shortAddress(address, 8, 6)}.`);
 }
 
 function showSection(sectionId) {
@@ -909,10 +909,10 @@ async function createAgreement(event) {
     
     let photoCID = "";
     if (state.parcelPhotos.length > 0) {
-        setTransactionState(true, "Uploading parcel photo to Pinata", "This may take a few seconds...");
+        setTransactionState(true, "Uploading parcel photo to IPFS", "This may take a few seconds...");
         try {
             const file = state.parcelPhotos[0].file;
-            photoCID = await uploadToPinata(file);
+            photoCID = (await uploadToIPFS(file)) || "";
             if (photoCID) {
                 console.log('Parcel photo uploaded:', photoCID);
                 showToast(`Parcel photo uploaded: ${photoCID.substring(0, 12)}...`, 'success');
@@ -1194,14 +1194,15 @@ async function submitAction(event) {
     }
     
     try {
+
         if (action === "report") {
             let proofCID = "";
             const fileInput = document.querySelector('[name="proofCID"]');
 
             if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading proof to Pinata", "Uploading milestone proof photo...");
+                setTransactionState(true, "Uploading proof to IPFS", "Uploading milestone proof photo...");
                 try {
-                    proofCID = await uploadToPinata(fileInput.files[0]);
+                    proofCID = (await uploadToIPFS(fileInput.files[0])) || "";
                     if (proofCID) {
                         console.log('Milestone proof uploaded:', proofCID);
                         showToast(`Proof uploaded: ${proofCID.substring(0, 12)}...`, 'success');
@@ -1244,9 +1245,9 @@ async function submitAction(event) {
             const evidenceFileInput = document.querySelector('[name="evidenceCID"]');
             
             if (evidenceFileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to Pinata", "Uploading dispute evidence photo...");
+                setTransactionState(true, "Uploading evidence to IPFS", "Uploading dispute evidence photo...");
                 try {
-                    evidenceCID = await uploadToPinata(evidenceFileInput.files[0]);
+                    evidenceCID = (await uploadToIPFS(evidenceFileInput.files[0])) || "";
                     if (evidenceCID) {
                         console.log('Evidence uploaded:', evidenceCID);
                         showToast(`Evidence uploaded: ${evidenceCID.substring(0, 12)}...`, 'success');
@@ -1293,9 +1294,9 @@ async function submitAction(event) {
             const fileInput = document.querySelector('[name="fileCID"]');
 
             if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to Pinata", "Uploading evidence photo...");
+                setTransactionState(true, "Uploading evidence to IPFS", "Uploading evidence photo...");
                 try {
-                    fileCID = await uploadToPinata(fileInput.files[0]);
+                    fileCID = (await uploadToIPFS(fileInput.files[0])) || "";
                     if (fileCID) {
                         console.log('Evidence uploaded:', fileCID);
                         showToast(`Evidence uploaded: ${fileCID.substring(0, 12)}...`, 'success');
@@ -1319,6 +1320,7 @@ async function submitAction(event) {
         $("#actionDialog").close();
         
     } catch (_) {
+        // Error already handled by sendTransaction
     }
 }
 
