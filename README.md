@@ -12,9 +12,24 @@ A decentralized application (dApp) built on Ethereum using Solidity, Truffle, an
 | C | Deadlines, Refunds, Disputes & Reputation Token |
 | D | Frontend & Integration |
 
+## Technology Stack
+
+| Layer | Technology | Version |
+|-------|------------|---------|
+| **Blockchain** | Ethereum (Sepolia Testnet) | - |
+| **Smart Contracts** | Solidity | 0.8.19 |
+| **Development Framework** | Truffle | 5.11.5 |
+| **Local Blockchain** | Ganache | Latest |
+| **Frontend** | HTML5, CSS3, JavaScript (ES6) | - |
+| **Web3 Library** | Web3.js | 1.8.0+ |
+| **Wallet** | MetaMask | Latest |
+| **Package Manager** | npm | - |
+| **Testing** | Truffle Test (Mocha) | - |
+| **Version Control** | Git & GitHub | - |
+
 ## Prerequisites
 
-Install these before doing anything else:
+Install these before any next step:
 
 | Tool | Link | Check it worked |
 |---|---|---|
@@ -39,6 +54,27 @@ escrow-dapp/
 └── package.json
 ```
 
+## Smart Contracts Overview
+
+### Escrow.sol
+
+Main contract managing users, agreements, milestones, and disputes:
+
+| Module | Key Functions | Description |
+|--------|--------------|-------------|
+| **User Management** | `registerUser()`, `setDisplayName()`, `setCarrierProfile()` | User registration and profiles |
+| **Agreement Management** | `createAgreement()`, `acceptAgreement()`, `rejectAgreement()`, `fundAgreement()`, `extendDeadline()` | Full agreement lifecycle |
+| **Milestone Management** | `reportMilestone()`, `verifyMilestone()`, `getMilestone()` | Milestone tracking and payments |
+| **Dispute Management** | `raiseDispute()`, `submitEvidence()`, `resolveDispute()` | Dispute resolution |
+| **Arbitration** | `withdrawCommission()`, `setCompletionReward()`, `setDisputeWinReward()` | Commission and rewards |
+
+### ReputationToken.sol
+
+ERC20-compatible reputation token:
+- Only Escrow contract can mint tokens
+- 100 tokens on agreement completion (configurable)
+- 100 tokens if arbitrator rules in carrier's favor
+
 ## Setup — first time only
 
 1. Clone the repository:
@@ -50,12 +86,17 @@ escrow-dapp/
    ```bash
    npm install
    ```
-3. Open the **Ganache** desktop app and start a new workspace. Note the RPC server address shown (default `127.0.0.1:7545`).
-4. Compile the contracts:
+3. Create .env file for Sepolia deployment (optional):
+   ```bash
+   MNEMONIC="your twelve word mnemonic here"
+   INFURA_KEY="your_infura_api_key_here"
+   ```
+4. Open the **Ganache** desktop app and start a new workspace. Note the RPC server address shown (default `127.0.0.1:7545`).
+5. Compile the contracts:
    ```bash
    truffle compile
    ```
-5. Deploy the contracts to Ganache:
+6. Deploy the contracts to Ganache:
    ```bash
    truffle migrate
    ```
@@ -70,23 +111,6 @@ npm run dev
 This starts a local server (via `lite-server`) serving the frontend, typically at `http://localhost:3000`.
 
 The UI reads the active deployment from `build/contracts/Escrow.json`. If the connected network has no recorded deployment, it shows a setup panel where you can paste an Escrow contract address manually. For a UI-only preview with sample agreements, open `http://localhost:3000/?demo=1`.
-
-### Frontend features
-
-- MetaMask connect flow with automatic account/network change handling
-- Arbitrator-first role routing, on-chain registration, and role-specific dashboards
-- Searchable, sortable carrier marketplace with location, delivery-type, profile, and reputation filters
-- Route-aware carrier selection and agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
-- Editable browser-calculated price suggestion and duplicate-milestone validation
-- Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
-- Month and exact-date agreement filters, plus active agreements ordered by nearest deadline
-- Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
-- Optional parcel, milestone-delivery, and dispute-evidence photos with local preview and IPFS CID/public-URL storage
-- Refund, dispute, evidence, and arbitrator resolution controls
-- Chronological milestone report/verification history and recent on-chain account activity
-- Editable display names, carrier service profiles, and ReputationToken point/star display
-
-On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.
 
 ## Connecting MetaMask to your local Ganache network
 
@@ -116,6 +140,23 @@ git push origin your-branch-name
 
 - Set agreement deadlines a few minutes in the future (not days) when creating test agreements, so both the successful-completion and missed-deadline-refund paths can be demonstrated within a short presentation window.
 - Simulate different users by switching the active account in MetaMask's dropdown between imported Ganache test accounts.
+  
+### Frontend features
+
+- MetaMask connect flow with automatic account/network change handling
+- Arbitrator-first role routing, on-chain registration, and role-specific dashboards
+- Searchable, sortable carrier marketplace with location, delivery-type, profile, and reputation filters
+- Route-aware carrier selection and agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
+- Editable browser-calculated price suggestion and duplicate-milestone validation
+- Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
+- Month and exact-date agreement filters, plus active agreements ordered by nearest deadline
+- Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
+- Optional parcel, milestone-delivery, and dispute-evidence photos with local preview and IPFS CID/public-URL storage
+- Refund, dispute, evidence, and arbitrator resolution controls
+- Chronological milestone report/verification history and recent on-chain account activity
+- Editable display names, carrier service profiles, and ReputationToken point/star display
+
+On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.
 
 ## Known limitations
 
