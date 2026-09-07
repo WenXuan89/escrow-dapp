@@ -12,13 +12,14 @@ contract Escrow {
 
     enum AgreementStatus {
         Created,     // agreement exists, not funded
+        Accepted,    // carrier accepted, ready to be funded
+        Rejected，    // carrier declined, no funds ever moved
         Funded,      // funds locked in escrow
         InProgress,  // at least one milestone verified
         Completed,   // all milestones verified
         Refunded,    // deadline missed, funds returned
-        Disputed,    // await resolution
-        Accepted,    // carrier accepted, ready to be funded
-        Rejected     // carrier declined, no funds ever moved
+        Disputed     // await resolution
+       
     }
 
     struct Milestone {
@@ -30,17 +31,6 @@ contract Escrow {
         uint256 reportedTimestamp;
         uint256 completedTimestamp;
         string proofCID;  // IPFS CID of photo/document proof (optional, empty allowed)
-    }
-
-    struct AgreementDetails {
-        uint8 origin;
-        uint8 destination;
-        uint8 itemType;
-        uint8 size;
-        uint256 weight;
-        uint8 deliverySpeed;
-        uint8 guaranteeTier;
-        string photoCID;
     }
 
     struct Agreement {
@@ -60,6 +50,17 @@ contract Escrow {
         
         Evidence[] evidence;
         AgreementDetails details;
+    }
+
+    struct AgreementDetails {
+        uint8 origin;
+        uint8 destination;
+        uint8 itemType;
+        uint8 size;
+        uint256 weight;
+        uint8 deliverySpeed;
+        uint8 guaranteeTier;
+        string photoCID;
     }
 
     struct Evidence {
@@ -84,21 +85,21 @@ contract Escrow {
     mapping(address => string) public displayName;
     mapping(address => uint256[]) public userAgreements;
     mapping(address => CarrierProfile) public carrierProfiles;
+    mapping(address => uint256) public completionReputationEarned;
+    mapping(address => uint256) public disputeReputationEarned;
 
     address[] public carrierList;   
     address public arbitrator;
 
-    uint256 public agreementCount;
     bool private locked;
 
     ReputationToken public reputationToken;
 
+    uint256 public agreementCount;
     uint256 public constant COMMISSION_PERCENT = 5;
     uint256 public arbitratorEarnings;
     uint256 public completionReward = 100;
     uint256 public disputeWinReward = 100;
-    mapping(address => uint256) public completionReputationEarned;
-    mapping(address => uint256) public disputeReputationEarned;
 
     /* =========
      * EVENTS
@@ -156,6 +157,11 @@ contract Escrow {
 
     modifier beforeDeadline(uint256 agreementId) {
         require(block.timestamp <= agreements[agreementId].deadline, "Deadline has passed");
+        _;
+    }
+
+    modifier onlyArbitrator() {
+        require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
         _;
     }
 
@@ -507,11 +513,7 @@ contract Escrow {
         require(!milestone.completed, "Milestone already verified"
         );
 
-        uint256 payout =
-            (
-                agreement.totalValue *
-                milestone.payoutPercentage
-            ) / 100;
+        uint256 payout = (agreement.totalValue * milestone.payoutPercentage) / 100;
 
         require(
             payout > 0,"Payout must be greater than zero"
@@ -578,11 +580,6 @@ contract Escrow {
         require(sent, "Commission withdrawal failed");
 
         emit CommissionWithdrawn(amount);
-    }
-
-    modifier onlyArbitrator() {
-        require(msg.sender == arbitrator, "Only arbitrator can resolve disputes");
-        _;
     }
 
     /* ===============================
