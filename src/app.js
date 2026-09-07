@@ -1,7 +1,7 @@
-import { PINATA_JWT } from './config.js';
+// import { PINATA_JWT } from './config.js';
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
-const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed", "Accepted", "Rejected"];
+const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
 const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
@@ -9,12 +9,13 @@ const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
 const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day", "Scheduled"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
-const ACTIVE_STATUSES = [1, 2];
-const OPEN_STATUSES = [0, 1, 2, 6];
-const CLOSED_STATUSES = [3, 4, 7];
+const ACTIVE_STATUSES = [3, 4];
+const OPEN_STATUSES = [0, 1, 3, 4];
+const CLOSED_STATUSES = [2, 5, 6, 7];
 const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+const PINATA_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI2NjNlZDI5NC1lZjRiLTRiNDctOGQyNy1hNTlhZDQxNDAwMzMiLCJlbWFpbCI6Indlbnh1YW5uODlAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImZmMzQ5NmViYzMxZDdjMTMwNWZhIiwic2NvcGVkS2V5U2VjcmV0IjoiMWNkNGJlZmQ3NzcxYWNiMmJmOTRkODBmZjI0NWQ5YzE5MzdiZDE5NmZjNWYyZDIzMzY3YzYxODRkNjY3MTlkYyIsImV4cCI6MTgyMDMxNzU2OX0.1JYGzd4hSomaSwNTCY5X79aEzHOk-7ANmUDMPbxwQoQ';
 
 const state = {
   web3: null,
@@ -408,9 +409,11 @@ async function routeConnectedUser() {
 function configureDashboardForRole() {
   const isShipper = state.role === ROLE.SHIPPER;
   const isArbitrator = state.role === ROLE.ARBITRATOR;
+  
   $$(".shipper-only").forEach(node => node.classList.toggle("role-hidden", !isShipper));
   $$(".carrier-only").forEach(node => node.classList.toggle("role-hidden", state.role !== ROLE.CARRIER));
   $$(".arbitrator-only").forEach(node => node.classList.toggle("role-hidden", !isArbitrator));
+  
   $("#profileRole").textContent = roleLabel(state.role);
   $("#profileAddress").textContent = shortAddress(state.account, 8, 6);
   $("#profileAvatar").textContent = state.account.slice(2, 4).toUpperCase();
@@ -424,23 +427,22 @@ function configureDashboardForRole() {
   $("#activeFilterButton").textContent = isArbitrator ? "Active" : "Active";
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
+  
   state.filter = "all";
   resetAgreementDateFilters(false);
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
 
-  // Restore the participant dashboard labels whenever MetaMask changes from
-  // the arbitrator account to a shipper or carrier account.
   $("#statOneLabel").textContent = "Wallet balance";
   $("#statOneHelp").textContent = "Connected account";
-  $("#statTwoLabel").textContent = "Locked in my escrows";
-  $("#statTwoHelp").textContent = "Funded minus released";
+  $("#statTwoLabel").textContent = "Locked in escrow";
+  $("#statTwoHelp").textContent = "Total escrow balance";
   $("#statThreeLabel").textContent = "Active agreements";
   $("#statThreeHelp").textContent = "Funded or in progress";
   $("#statFourLabel").textContent = "Completed";
   $("#statFourHelp").textContent = "Successfully settled";
 
   if (isArbitrator) {
-    $("#statOneLabel").textContent = "Active agreements";
+    $("#statOneLabel").textContent = "Open agreements";
     $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
     $("#statTwoLabel").textContent = "Active disputes";
     $("#statTwoHelp").textContent = "Awaiting an on-chain ruling";
@@ -545,15 +547,35 @@ async function refreshArbitratorControls() {
 async function refreshActivity() {
   if (state.demo) return;
   try {
-    const events = await state.contract.getPastEvents("allEvents", { fromBlock: 0, toBlock: "latest" });
+    const events = await state.contract.getPastEvents("allEvents", { 
+      fromBlock: 0, 
+      toBlock: "latest" 
+    });
+    
     const account = state.account.toLowerCase();
-    const visible = state.role === ROLE.ARBITRATOR ? events : events.filter(event => Object.values(event.returnValues || {}).some(value => typeof value === "string" && value.toLowerCase() === account));
-    const recent = visible.slice(-20).reverse();
+    
+    const visible = state.role === ROLE.ARBITRATOR ? 
+      events : 
+      events.filter(event => {
+        const values = Object.values(event.returnValues || {});
+        return values.some(value => 
+          typeof value === "string" && value.toLowerCase() === account
+        );
+      });
+    
+    const recent = visible.slice(-50).reverse();
     const blockNumbers = [...new Set(recent.map(event => event.blockNumber))];
     const blocks = await Promise.all(blockNumbers.map(number => state.web3.eth.getBlock(number)));
     const timestamps = Object.fromEntries(blocks.map(block => [block.number, Number(block.timestamp)]));
-    state.activity = recent.map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 })).sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
-  } catch (_) { state.activity = []; }
+    
+    state.activity = recent
+      .map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 }))
+      .sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber);
+    
+    renderActivity();
+  } catch (_) { 
+    state.activity = []; 
+  }
 }
 
 async function agreementIdsForCurrentUser() {
@@ -637,35 +659,71 @@ function completedMilestones(agreement) {
 }
 
 function needsAttention(agreement) {
-  if (agreement.status === 5) return true;
-  if (state.role === ROLE.CARRIER && agreement.status === 0) return true;
-  if (state.role === ROLE.SHIPPER && agreement.status === 6) return true;
-  if (state.role === ROLE.SHIPPER && agreement.milestones.some(milestone => milestone.reported && !milestone.completed)) return true;
-  if (state.role === ROLE.CARRIER && ACTIVE_STATUSES.includes(agreement.status) && agreement.milestones.some(milestone => !milestone.reported)) return true;
-  return ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
+
+  if (agreement.status === 7) return true;
+  if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) return true;
+  
+  if (state.role === ROLE.SHIPPER) {
+    if (agreement.status === 0) return true;
+    
+    if (agreement.status === 1) return true;
+
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => m.reported && !m.completed)) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+
+  if (state.role === ROLE.CARRIER) {
+
+    if (agreement.status === 0) return true;
+
+    if (agreement.status === 1) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+  return false;
 }
 
 function renderDashboard() {
-  const open = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
-  const active = state.agreements.filter(agreement => ACTIVE_STATUSES.includes(agreement.status));
-  const completed = state.agreements.filter(agreement => agreement.status === 3);
-  const activeDisputes = state.agreements.filter(agreement => agreement.status === 5);
-  const resolvedDisputes = state.agreements.filter(agreement => agreement.disputeReason > 0 && agreement.status !== 5);
+  const created = state.agreements.filter(a => a.status === 0).length;
+  const accepted = state.agreements.filter(a => a.status === 1).length;
+  const rejected = state.agreements.filter(a => a.status === 2).length;
+  const funded = state.agreements.filter(a => a.status === 3).length;
+  const inProgress = state.agreements.filter(a => a.status === 4).length;
+  const completed = state.agreements.filter(a => a.status === 5).length;
+  const refunded = state.agreements.filter(a => a.status === 6).length;
+  const disputed = state.agreements.filter(a => a.status === 7).length;
+
+  const active = funded + inProgress;
+  const open = created + accepted + funded + inProgress;
+  const total = state.agreements.length;
+  const activeDisputes = state.agreements.filter(a => a.status === 7).length;
+  const resolvedDisputes = state.agreements.filter(a => a.disputeReason > 0 && a.status !== 7).length;
+  
   const totalEscrow = state.agreements.reduce((sum, agreement) => {
     if (state.demo) return sum + escrowRemaining(agreement);
     return sum + BigInt(escrowRemaining(agreement));
   }, state.demo ? 0 : 0n);
-  if (state.role === ROLE.ARBITRATOR) {
-    $("#walletBalance").textContent = open.length;
-    $("#escrowBalance").textContent = activeDisputes.length;
-    $("#activeCount").textContent = completed.length;
-    $("#completedCount").textContent = resolvedDisputes.length;
-    $("#agreementNavCount").textContent = activeDisputes.length + resolvedDisputes.length;
-  } else {
+  
+  if (state.role !== ROLE.ARBITRATOR) {
     $("#escrowBalance").textContent = formatEth(totalEscrow);
-    $("#activeCount").textContent = active.length;
-    $("#completedCount").textContent = completed.length;
-    $("#agreementNavCount").textContent = state.agreements.length;
+    $("#activeCount").textContent = active;
+    $("#completedCount").textContent = completed;
+    $("#agreementNavCount").textContent = total;
+  }
+
+  if (state.role === ROLE.ARBITRATOR) {
+
+    $("#walletBalance").textContent = open;
+    $("#escrowBalance").textContent = activeDisputes;
+    $("#activeCount").textContent = completed;
+    $("#completedCount").textContent = resolvedDisputes;
+    $("#agreementNavCount").textContent = activeDisputes + resolvedDisputes;
   }
   renderRecentAgreements();
   renderAgreementGrid();
@@ -841,10 +899,52 @@ function renderMarketplace() {
   carriers.sort((a, b) => $("#carrierSort")?.value === "reputation" ? Number(b.reputation) - Number(a.reputation) : a.name.localeCompare(b.name));
   $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Try removing one of the marketplace filters.</div>`;
 }
-
 function renderActivity() {
-  const labels = { AgreementCreated: "Agreement created", AgreementAccepted: "Agreement accepted", AgreementRejected: "Agreement rejected", AgreementFunded: "Escrow funded", DeadlineExtended: "Deadline extended", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CommissionCollected: "Commission collected", CommissionWithdrawn: "Commission withdrawn", ReputationRewardsUpdated: "Reward settings updated", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
-  $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>${event.timestamp ? formatDate(event.timestamp) + " · " : ""}Block ${event.blockNumber} · ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent activity</strong>New on-chain activity will appear here.</div>`;
+  const labels = { 
+    AgreementCreated: "Agreement created", 
+    AgreementAccepted: "Agreement accepted", 
+    AgreementRejected: "Agreement rejected", 
+    AgreementFunded: "Escrow funded", 
+    DeadlineExtended: "Deadline extended", 
+    MilestoneReported: "Milestone reported", 
+    MilestoneVerified: "Milestone verified", 
+    AgreementRefunded: "Shipper refunded", 
+    DisputeRaised: "Dispute raised", 
+    DisputeResolved: "Dispute resolved", 
+    EvidenceSubmitted: "Evidence submitted", 
+    CommissionCollected: "Commission collected", 
+    CommissionWithdrawn: "Commission withdrawn", 
+    ReputationRewardsUpdated: "Reputation rewards updated", 
+    CarrierProfileUpdated: "Carrier profile updated", 
+    DisplayNameUpdated: "Display name updated" 
+  };
+  
+  if (!state.activity.length) {
+    $("#activityFeed").innerHTML = `<div class="empty-state"><strong>No recent activity</strong>New on-chain activity will appear here.</div>`;
+    return;
+  }
+  
+  $("#activityFeed").innerHTML = state.activity.map(event => {
+    const label = labels[event.event] || event.event;
+    let extraInfo = '';
+
+    if (event.returnValues?.agreementId !== undefined) {
+      extraInfo = ` · Agreement #${event.returnValues.agreementId}`;
+    }
+
+    if (event.returnValues?.amount !== undefined) {
+      extraInfo += ` · ${formatEth(event.returnValues.amount)}`;
+    }
+
+    let who = '';
+    if (event.returnValues?.shipper) who = `Shipper: ${shortAddress(event.returnValues.shipper, 6, 4)}`;
+    else if (event.returnValues?.carrier) who = `Carrier: ${shortAddress(event.returnValues.carrier, 6, 4)}`;
+    
+    return `<article class="activity-item">
+      <span>${escapeHtml(label)}${extraInfo}</span>
+      <small>${event.timestamp ? formatDate(event.timestamp) : 'Just now'}${who ? ' · ' + who : ''}</small>
+    </article>`;
+  }).join("");
 }
 
 function showSection(sectionId) {
@@ -904,7 +1004,8 @@ async function createAgreement(event) {
     if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
     if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
     if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
-    if (Number($("#origin").value) === Number($("#destination").value)) return showToast("Origin and destination must be different.", "error");
+    //if (Number($("#origin").value) === Number($("#destination").value)) return showToast("Origin and destination must be different.", "error");
+    if (Number($("#origin").value) === Number($("#destination").value)) {showToast("💡 Note: Origin and destination are the same. This is allowed for intra-state deliveries.", "info");}
     if (Number($("#weight").value) <= 0) return showToast("Weight must be greater than zero.", "error");
     
     let photoCID = "";
@@ -1090,46 +1191,222 @@ function timelineEvents(agreement) {
 function renderAgreementDetail(agreement) {
   const complete = completedMilestones(agreement);
   const events = timelineEvents(agreement);
-  const canDispute = [ROLE.SHIPPER, ROLE.CARRIER].includes(state.role) && ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline >= Date.now() / 1000;
-  const canRefund = ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
-  const isParticipant = [agreement.shipper, agreement.carrier].some(address => address.toLowerCase() === state.account.toLowerCase());
-  const disputeReason = agreement.disputeReason > 0 ? (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : "";
+  
+  const canDispute = [ROLE.SHIPPER, ROLE.CARRIER].includes(state.role) && 
+                     [3, 4].includes(agreement.status) && 
+                     agreement.deadline >= Date.now() / 1000;
+  
+  const canRefund = [3, 4].includes(agreement.status) && 
+                    agreement.deadline < Date.now() / 1000;
+  
+  const isParticipant = [agreement.shipper, agreement.carrier].some(address => 
+    address.toLowerCase() === state.account.toLowerCase()
+  );
+  
+  const disputeReason = agreement.disputeReason > 0 ? 
+    (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : 
+    "";
+  
   const details = agreement.details;
+  
   $("#agreementDetail").innerHTML = `
-    <div class="detail-head"><span class="section-label">On-chain agreement</span><div class="detail-title-row"><div><h2>Agreement #${agreement.id}</h2><p>${shortAddress(agreement.shipper, 9, 6)} → ${shortAddress(agreement.carrier, 9, 6)}</p></div>${statusPill(agreement.status)}</div></div>
+    <div class="detail-head">
+      <span class="section-label">On-chain agreement</span>
+      <div class="detail-title-row">
+        <div>
+          <h2>Agreement #${agreement.id}</h2>
+          <p>${shortAddress(agreement.shipper, 9, 6)} → ${shortAddress(agreement.carrier, 9, 6)}</p>
+        </div>
+        ${statusPill(agreement.status)}
+      </div>
+    </div>
+    
     <div class="detail-body">
       <div class="detail-stats">
-        <div class="detail-stat"><span>Total value</span><strong>${formatEth(agreement.totalValue)}</strong></div>
-        <div class="detail-stat"><span>Released</span><strong>${formatEth(agreement.releasedAmount)}</strong></div>
-        <div class="detail-stat"><span>Current escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div>
-        <div class="detail-stat"><span>Deadline</span><strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong></div>
+        <div class="detail-stat">
+          <span>Total value</span>
+          <strong>${formatEth(agreement.totalValue)}</strong>
+        </div>
+        <div class="detail-stat">
+          <span>Released</span>
+          <strong>${formatEth(agreement.releasedAmount)}</strong>
+        </div>
+        <div class="detail-stat">
+          <span>Current escrow</span>
+          <strong>${formatEth(escrowRemaining(agreement))}</strong>
+        </div>
+        <div class="detail-stat">
+          <span>Deadline</span>
+          <strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong>
+        </div>
       </div>
-      ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div></div>${details.photoCID ? `<div class="proof-gallery"><div><span class="section-label">Parcel photo</span>${imageProof(details.photoCID, `Parcel for agreement ${agreement.id}`, "View parcel photo")}</div></div>` : ""}` : ""}
-      ${agreement.disputeReason > 0 ? `<div class="evidence-card"><span class="section-label">${agreement.status === 5 ? "Active dispute" : "Resolved dispute"}</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
-      <div class="detail-section-title"><h3>Milestone progress</h3><span>${complete} of ${agreement.milestones.length} verified</span></div>
-      <div class="milestone-stepper">${agreement.milestones.map(milestone => `
-        <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
-          <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
-          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}</p>${milestone.proofCID ? imageProof(milestone.proofCID, `${milestoneName(milestone)} delivery proof`, "View milestone photo") : ""}</div>
-          <span class="milestone-payout">${milestone.percentage}%</span>
-          <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
-        </div>`).join("")}</div>
-      <div class="detail-section-title"><h3>Chronological history</h3><span>Newest first</span></div>
-      <div class="timeline">${events.length ? events.map(event => `<div class="timeline-event"><strong>${escapeHtml(event.title)}</strong><span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span></div>`).join("") : `<div class="timeline-event"><strong>No milestone activity yet</strong><span>Reports and verifications will appear here.</span></div>`}</div>
-      ${agreement.disputeReason > 0 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>No participant evidence was attached to this dispute.</div>`}</div>` : ""}
+      
+      ${details ? `
+        <div class="shipment-details">
+          <div>
+            <span>Route</span>
+            <strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong>
+          </div>
+          <div>
+            <span>Parcel</span>
+            <strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong>
+          </div>
+          <div>
+            <span>Service</span>
+            <strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong>
+          </div>
+          <div>
+            <span>Weight</span>
+            <strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong>
+          </div>
+        </div>
+        ${details.photoCID ? `
+          <div class="proof-gallery">
+            <div>
+              <span class="section-label">Parcel photo</span>
+              ${imageProof(details.photoCID, `Parcel for agreement ${agreement.id}`, "View parcel photo")}
+            </div>
+          </div>
+        ` : ""}
+      ` : ""}
+      
+      ${agreement.disputeReason > 0 ? `
+        <div class="evidence-card">
+          <span class="section-label">${agreement.status === 7 ? "Active dispute" : "Resolved dispute"}</span>
+          <p>${escapeHtml(disputeReason || "Reason unavailable")}</p>
+        </div>
+      ` : ""}
+      
+      <div class="detail-section-title">
+        <h3>Milestone progress</h3>
+        <span>${complete} of ${agreement.milestones.length} verified</span>
+      </div>
+      
+      <div class="milestone-stepper">
+        ${agreement.milestones.map(milestone => `
+          <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
+            <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
+            <div class="milestone-copy">
+              <h4>${escapeHtml(milestoneName(milestone))}</h4>
+              <p>
+                ${milestone.completed ? 
+                  `Verified ${formatDate(milestone.completedTimestamp)}` : 
+                  milestone.reported ? 
+                    `Reported ${formatDate(milestone.reportedTimestamp)}` : 
+                    "Waiting for carrier report"
+                }
+                ${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}
+              </p>
+              ${milestone.proofCID ? imageProof(milestone.proofCID, `${milestoneName(milestone)} delivery proof`, "View milestone photo") : ""}
+            </div>
+            <span class="milestone-payout">${milestone.percentage}%</span>
+            <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
+          </div>
+        `).join("")}
+      </div>
+      
+      <div class="detail-section-title">
+        <h3>Chronological history</h3>
+        <span>Newest first</span>
+      </div>
+      
+      <div class="timeline">
+        ${events.length ? 
+          events.map(event => `
+            <div class="timeline-event">
+              <strong>${escapeHtml(event.title)}</strong>
+              <span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span>
+            </div>
+          `).join("") : 
+          `<div class="timeline-event">
+            <strong>No milestone activity yet</strong>
+            <span>Reports and verifications will appear here.</span>
+          </div>`
+        }
+      </div>
+      
+      ${agreement.disputeReason > 0 ? `
+        <div class="detail-section-title">
+          <h3>Submitted evidence</h3>
+          <span>${agreement.evidence?.length || 0} item(s)</span>
+        </div>
+        <div class="evidence-list">
+          ${agreement.evidence?.length ? 
+            agreement.evidence.map(item => `
+              <article class="evidence-card">
+                <strong>${shortAddress(item.submittedBy, 9, 6)}</strong>
+                <p>${escapeHtml(item.description)}</p>
+                <small>
+                  ${formatDate(item.timestamp)} 
+                  ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}
+                </small>
+                ${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}
+              </article>
+            `).join("") : 
+            `<div class="empty-state">
+              <strong>No evidence submitted</strong>
+              <p>No participant evidence was attached to this dispute.</p>
+            </div>`
+          }
+        </div>
+      ` : ""}
+      
       <div class="detail-actions">
-        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `<button class="button button-primary" type="button" data-action="accept">Accept agreement</button><button class="button button-danger" type="button" data-action="reject">Reject agreement</button>` : ""}
-        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>` : ""}
-        ${agreement.status === 6 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
-        ${agreement.status === 6 && state.role === ROLE.CARRIER ? `<span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>` : ""}
-        ${agreement.status === 7 ? `<span class="action-note">This agreement was rejected and cannot be funded.</span>` : ""}
-        ${state.role === ROLE.SHIPPER && ![3, 4, 5, 7].includes(agreement.status) ? `<button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>` : ""}
-        ${canDispute ? `<button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>` : ""}
-        ${canRefund ? `<button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>` : ""}
-        ${agreement.status === 5 && isParticipant ? `<button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>` : ""}
-        ${agreement.status === 5 && state.role === ROLE.ARBITRATOR ? `<button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button><button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>` : ""}
+        <!-- Created (0): Carrier can Accept/Reject -->
+        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `
+          <button class="button button-primary" type="button" data-action="accept">Accept agreement</button>
+          <button class="button button-danger" type="button" data-action="reject">Reject agreement</button>
+        ` : ""}
+        
+        <!-- Created (0): Shipper waits -->
+        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `
+          <span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>
+        ` : ""}
+        
+        <!-- Accepted (1): Shipper can FUND -->
+        ${agreement.status === 1 && state.role === ROLE.SHIPPER ? `
+          <button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>
+        ` : ""}
+        
+        <!-- Accepted (1): Carrier waits -->
+        ${agreement.status === 1 && state.role === ROLE.CARRIER ? `
+          <span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>
+        ` : ""}
+        
+        <!-- Rejected (2) -->
+        ${agreement.status === 2 ? `
+          <span class="action-note">This agreement was rejected and cannot be funded.</span>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Extend deadline -->
+        ${state.role === ROLE.SHIPPER && [2,5,6,7].includes(agreement.status) ? `
+          <button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Participants can Dispute -->
+        ${canDispute ? `
+          <button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Refund if deadline passed -->
+        ${canRefund ? `
+          <button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Participants can Submit Evidence -->
+        ${agreement.status === 7 && isParticipant ? `
+          <button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Arbitrator can Resolve -->
+        ${agreement.status === 7 && state.role === ROLE.ARBITRATOR ? `
+          <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
+          <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
+        ` : ""}
       </div>
-    </div>`;
+    </div>
+  `;
+  
   updateCountdowns();
 }
 

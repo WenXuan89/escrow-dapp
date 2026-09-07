@@ -13,7 +13,7 @@ contract Escrow {
     enum AgreementStatus {
         Created,     // agreement exists, not funded
         Accepted,    // carrier accepted, ready to be funded
-        Rejected，    // carrier declined, no funds ever moved
+        Rejected,    // carrier declined, no funds ever moved
         Funded,      // funds locked in escrow
         InProgress,  // at least one milestone verified
         Completed,   // all milestones verified
