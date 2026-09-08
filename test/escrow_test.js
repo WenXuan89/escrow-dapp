@@ -22,13 +22,13 @@ const DISPUTE_OTHER = 5;
 // AgreementStatus enum (Accepted/Rejected appended at the end, so
 // Created..Disputed keep their original 0-5 values)
 const STATUS_CREATED = '0';
-const STATUS_FUNDED = '1';
-const STATUS_INPROGRESS = '2';
-const STATUS_COMPLETED = '3';
-const STATUS_REFUNDED = '4';
-const STATUS_DISPUTED = '5';
-const STATUS_ACCEPTED = '6';
-const STATUS_REJECTED = '7';
+const STATUS_ACCEPTED = '1';
+const STATUS_REJECTED = '2';
+const STATUS_FUNDED = '3';
+const STATUS_INPROGRESS = '4';
+const STATUS_COMPLETED = '5';
+const STATUS_REFUNDED = '6';
+const STATUS_DISPUTED = '7';
  
 // 5% arbitrator commission, matching COMMISSION_PERCENT in the contract
 function withCommission(amountBN) {
