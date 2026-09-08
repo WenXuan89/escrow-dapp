@@ -46,14 +46,24 @@ Install these before any next step:
 ```
 escrow-dapp/
 ├── contracts/
-│   ├── Escrow.sol
-│   └── ReputationToken.sol
+│ ├── Escrow.sol 
+│ ├── ReputationToken.sol 
+│ └── Escrow-flattened.sol # Flattened contract for Etherscan verification
 ├── migrations/
-│   └── 2_deploy_contracts.js
-├── src/                  (frontend: index.html, app.js, css)
+│ └── 2_deploy_contracts.js 
+├── src/
+│ ├── index.html 
+│ ├── app.js 
+│ ├── styles.css 
+│ └── config.template.js 
 ├── test/
-├── truffle-config.js
-└── package.json
+│ └── escrow_test.js 
+├── .gitignore 
+├── README.md 
+├── bs-config.json 
+├── package.json 
+├── package-lock.json 
+└── truffle-config.js 
 ```
 
 ## Smart Contracts Overview
