@@ -1,0 +1,9 @@
+# Sepolia Deployment - [Date]
+# Network: Sepolia (Chain ID: 11155111)
+
+ReputationToken: 0xc74e8af279910384757210b53F0394F678Fa81E5
+Escrow: 0x0A25e23f8fd5Eb711EDc022e7dDC1151D9A54A72
+
+# Etherscan Links:
+# Escrow: https://sepolia.etherscan.io/address/0x0A25e23f8fd5Eb711EDc022e7dDC1151D9A54A72
+# ReputationToken: https://sepolia.etherscan.io/address/0xc74e8af279910384757210b53F0394F678Fa81E5
