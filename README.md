@@ -91,7 +91,7 @@ ERC20-compatible reputation token:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR-TEAM/escrow-dapp.git
+   git clone https://github.com/WenXuan89/escrow-dapp.git
    cd escrow-dapp
    ```
 2. Install Node dependencies:
@@ -100,29 +100,33 @@ ERC20-compatible reputation token:
    ```
 3. Create .env file for Sepolia deployment (optional):
    ```bash
-   MNEMONIC="your twelve word mnemonic here"
-   INFURA_KEY="your_infura_api_key_here"
+  MNEMONIC="your twelve word mnemonic here"
+  INFURA_KEY="your_infura_api_key_here"ALCHEMY_KEY="your_alchemy_api_key_here"    # Optional
+  ETHERSCAN_KEY="your_etherscan_api_key"     # Optional for contract verification
    ```
-4. Open the **Ganache** desktop app and start a new workspace. Note the RPC server address shown (default `127.0.0.1:7545`).
-5. Compile the contracts:
+4. Set up Pinata API key (for photo uploads):
+   ```bash
+   cp src/config.template.js src/config.js
+   # Edit src/config.js and add your Pinata JWT token
+   # Get your token from https://pinata.cloud/
+   ```
+5. Open the **Ganache** desktop app and start a new workspace. Note the RPC server address shown (default `127.0.0.1:7545`). Note the Chain ID (commonly 1337 or 5777).
+6. Compile the contracts:
    ```bash
    truffle compile
    ```
-6. Deploy the contracts to Ganache:
+7. Deploy the contracts to Ganache:
    ```bash
-   truffle migrate
+   truffle migrate --network development
    ```
    (Use `truffle migrate --reset` to redeploy fresh after making contract changes.)
 
 ## Running the frontend
 
 ```bash
-npm run compile
 npm run dev
 ```
 This starts a local server (via `lite-server`) serving the frontend, typically at `http://localhost:3000`.
-
-The UI reads the active deployment from `build/contracts/Escrow.json`. If the connected network has no recorded deployment, it shows a setup panel where you can paste an Escrow contract address manually. For a UI-only preview with sample agreements, open `http://localhost:3000/?demo=1`.
 
 ## Connecting MetaMask to your local Ganache network
 
