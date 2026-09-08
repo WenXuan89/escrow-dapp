@@ -157,4 +157,5 @@ Thumbs.db
 
 # Deployment addresses (optional - keep or ignore)
 deployed-addresses.json
-addresses.json
+addresses.json"src/config.js" 
+"desktop.ini" 
