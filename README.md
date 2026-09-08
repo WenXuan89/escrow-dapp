@@ -3,6 +3,8 @@
 
 A decentralized application (dApp) built on Ethereum using Solidity, Truffle, and Ganache, allowing Shippers and Carriers to create, fund, and execute milestone-based logistics agreements with on-chain escrow, verification, refunds, disputes, and a reputation reward token.
 
+Repository Link: https://github.com/WenXuan89/escrow-dapp 
+
 ## Team
 
 | Member | Role |
@@ -141,27 +143,51 @@ git push origin your-branch-name
 - Set agreement deadlines a few minutes in the future (not days) when creating test agreements, so both the successful-completion and missed-deadline-refund paths can be demonstrated within a short presentation window.
 - Simulate different users by switching the active account in MetaMask's dropdown between imported Ganache test accounts.
   
-### Frontend features
+### Frontend Features
 
+**Wallet & Authentication**
 - MetaMask connect flow with automatic account/network change handling
-- Arbitrator-first role routing, on-chain registration, and role-specific dashboards
-- Searchable, sortable carrier marketplace with location, delivery-type, profile, and reputation filters
-- Route-aware carrier selection and agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
+- Role-based routing (Shipper, Carrier, Arbitrator) with on-chain registration
+- Display name management and carrier service profile settings
+
+**Carrier Marketplace**
+- Searchable, sortable carrier marketplace
+- Smart carrier selection flow: Select origin first → carriers in that origin displayed → choose delivery speed (Standard/Express/Same day) → carriers filter to match both origin AND speed
+
+**Agreement Creation**
+- Route-aware agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
+- Carrier speed validation: Validates that selected carrier offers the chosen delivery speed before agreement creation
 - Editable browser-calculated price suggestion and duplicate-milestone validation
-- Agreement participation, wallet balance, live escrow balance, progress, and deadline countdowns
-- Month and exact-date agreement filters, plus active agreements ordered by nearest deadline
-- Carrier milestone reporting with optional IPFS CID; shipper verification and payout release
-- Optional parcel, milestone-delivery, and dispute-evidence photos with local preview and IPFS CID/public-URL storage
-- Refund, dispute, evidence, and arbitrator resolution controls
-- Chronological milestone report/verification history and recent on-chain account activity
-- Editable display names, carrier service profiles, and ReputationToken point/star display
+- Milestone-based payment structure with configurable percentages
+
+**Agreement Management**
+- Agreement participation tracking with wallet balance, live escrow balance, progress indicators, and deadline countdowns
+- Smart deadline extension: Shipper can extend deadlines for open agreements (Created, Accepted, Funded, InProgress) but NOT for closed agreements (Completed, Refunded, Disputed, Rejected)
+- Month and exact-date agreement filters with active agreements ordered by nearest deadline
+- Attention filter: Shows agreements requiring immediate action (waiting for acceptance, funding, milestone reporting/verification, disputed, or deadline passed)
+
+**Milestone & Payment Flow**
+- Carrier milestone reporting with optional IPFS CID photo upload; shipper verification and automated payout release 
+- Status flow: Created → Accepted → Funded → InProgress → Completed
+- Commission system: 5% automatically deducted from each milestone payout and allocated to arbitrator
+- Automatic reputation minting: Reputation tokens awarded upon agreement completion
+
+**Dispute Resolution**
+- Dispute raising with predefined reasons and custom "Other" reason with description
+- Evidence submission with optional IPFS photo uploads (Shipper/Carrier can submit; Arbitrator can view all)
+- Arbitrator resolution: Pay carrier or refund shipper with automatic commission handling
+
+**Photo & IPFS Integration**
+- Optional parcel, milestone-delivery, and dispute-evidence photos with local preview
+- IPFS CID/public-URL storage via Pinata IPFS service 
+- No user API key required - pre-configured Pinata integration
+- Image preview and gallery display in agreement details
+
+**Dashboard & Analytics**
+- Role-specific dashboards: Shipper/Carrier (wallet balance, locked escrow, active agreements, completed count) and Arbitrator (open agreements, active disputes, completed agreements, resolved disputes)
+- Chronological milestone report/verification history
+- Recent on-chain account activity feed with event filtering (AgreementCreated, MilestoneReported, DisputeRaised, etc.)
+- Activity feed shows all relevant events including refunds, disputes, and commission collections
+- ReputationToken point/star display for carriers
 
 On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.
-
-## Known limitations
-
-- Milestone completion is self-reported by the Carrier and verified by the Shipper; there is no external IoT/GPS/oracle integration to confirm real-world delivery.
-- Dispute resolution authority (who may call `resolveDispute()`) is documented in the Design Document.
-- Reputation tokens are reward-only in the current scope; a penalty mechanism is sketched as an optional future enhancement.
-- Local image selection is a preview only. The contracts store a CID/URL string rather than image bytes, so production use still needs an IPFS uploader or another file-storage service.
-- The current `Escrow.sol` ABI does not yet expose the proposed carrier accept/reject workflow, deadline extension, admin commission withdrawal, or adjustable reward settings. The frontend reports this capability gap and does not show transaction controls that would revert or call missing methods.
