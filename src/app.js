@@ -7,7 +7,7 @@ const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient",
 const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
 const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
-const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day", "Scheduled"];
+const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
 const ACTIVE_STATUSES = [3, 4];
 const OPEN_STATUSES = [0, 1, 3, 4];
@@ -197,7 +197,7 @@ function renderAgreementFilterState(resultCount) {
     const label = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
     return void (summary.textContent = `${countLabel} with deadline in ${label}`);
   }
-  summary.textContent = state.filter === "closed" ? `${countLabel} · latest deadline first` : countLabel;
+  summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
 }
 
 function formatEth(wei, precision = 4) {
@@ -759,8 +759,8 @@ function agreementMatchesFilter(agreement) {
   let matchesStatus = true;
   if (state.role === ROLE.ARBITRATOR) {
     matchesStatus = agreement.disputeReason > 0;
-    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 5;
-    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 5;
+    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
+    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
   } else {
     if (state.filter === "active") matchesStatus = OPEN_STATUSES.includes(agreement.status);
     if (state.filter === "attention") matchesStatus = needsAttention(agreement);
@@ -802,19 +802,21 @@ function renderAgreementGrid() {
 }
 
 function renderCarriers() {
-  const quick = $("#carrierQuickList");
-  const picker = $("#carrierPicker");
-  const marketplace = $("#carrierMarketplace");
-  if (!quick || !picker || !marketplace) return;
-  if (!state.carriers.length) {
-    quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
-    picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
-    marketplace.innerHTML = picker.innerHTML;
-    return;
-  }
-  quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
-  picker.innerHTML = matchingCarriersForForm().map(carrier => carrierCard(carrier, true)).join("") || `<div class="empty-state"><strong>No route match</strong>Adjust the shipment origin or delivery speed.</div>`;
-  renderMarketplace();
+    const quick = $("#carrierQuickList");
+    const picker = $("#carrierPicker");
+    const marketplace = $("#carrierMarketplace");
+    
+    if (!quick || !picker || !marketplace) return;
+    
+    if (!state.carriers.length) {
+        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
+        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
+        marketplace.innerHTML = picker.innerHTML;
+        return;
+    }
+    quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
+    updateCarrierPicker();
+    renderMarketplace();
 }
 
 function reputationLabel(points) {
@@ -837,18 +839,69 @@ function carrierCard(carrier, selectOnly = false) {
 function matchingCarriersForForm() {
     const origin = Number($("#origin")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
-    const bit = speed <= 3 ? 2 ** (speed - 1) : 0;
+    const speedBit = speed <= 3 ? 2 ** (speed - 1) : 0;
     
     return state.carriers.filter(carrier => {
-  
+       
         if (!carrier.profile?.isSet) return false;
         
         if (origin && carrier.profile.location !== origin) return false;
         
-        if (bit && !(carrier.profile.deliveryTypes & bit)) return false;
+        if (speedBit && !(carrier.profile.deliveryTypes & speedBit)) return false;
         
         return true;
     });
+}
+
+function updateCarrierPicker() {
+    const picker = $("#carrierPicker");
+    const origin = Number($("#origin")?.value || 0);
+    const speed = Number($("#deliverySpeed")?.value || 0);
+    
+    const matchingCarriers = matchingCarriersForForm();
+    
+    if (!origin) {
+        picker.innerHTML = `
+            <div class="empty-state">
+                <strong>Select an origin first</strong>
+                <p>Choose the shipment origin to see available carriers.</p>
+            </div>
+        `;
+        $("#selectedCarrier").value = "";
+        return;
+    }
+
+    if (matchingCarriers.length === 0) {
+        const speedLabel = speed ? DELIVERY_SPEEDS[speed] : "selected";
+        picker.innerHTML = `
+            <div class="empty-state">
+                <strong>No carriers match</strong>
+                <p>No carriers in ${LOCATIONS[origin]} offer ${speedLabel} delivery.</p>
+                <p style="font-size:12px;margin-top:8px;">Try changing the delivery speed or origin.</p>
+            </div>
+        `;
+        $("#selectedCarrier").value = "";
+        return;
+    }
+    
+    picker.innerHTML = matchingCarriers.map(carrier => 
+        carrierCard(carrier, true)
+    ).join("");
+    
+    if (matchingCarriers.length === 1) {
+        selectCarrier(matchingCarriers[0].address);
+    }
+}
+
+function updateSpeedOptions() {
+    const speedSelect = $("#deliverySpeed");
+    
+    speedSelect.innerHTML = `
+        <option value="">Select speed...</option>
+        <option value="1">Standard</option>
+        <option value="2">Express</option>
+        <option value="3">Same day</option>
+    `;
 }
 
 function getAvailableSpeedsForCarrier(carrierAddress) {
@@ -884,11 +937,14 @@ function updateDeliverySpeedOptions() {
 }
 
 function selectCarrier(address) {
+    if ($("#selectedCarrier").value === address) {
+        showSection("createSection");
+        return;
+    }
     $("#selectedCarrier").value = address;
-    $$('[data-select-carrier]').forEach(node => node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase()));
-    
-    updateDeliverySpeedOptions();
-    
+    $$('[data-select-carrier]').forEach(node => {
+        node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase());
+    });  
     showSection("createSection");
     showToast(`Selected ${shortAddress(address, 8, 6)}.`);
 }
@@ -989,7 +1045,7 @@ function updatePriceSuggestion(fillIfEmpty = false) {
 async function createAgreement(event) {
     event.preventDefault();
     if (state.demo) return showToast("Creation is disabled in preview mode.", "error");
-    
+
     const carrier = $("#selectedCarrier").value;
     const ethValue = $("#totalValue").value;
     const deadline = Math.floor(new Date($("#deadline").value).getTime() / 1000);
@@ -997,17 +1053,40 @@ async function createAgreement(event) {
     const types = rows.map(row => Number($(".milestone-type", row).value));
     const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
     const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
-    
+    const selectedSpeed = Number($("#deliverySpeed").value);
+
     if (!carrier) return showToast("Select a registered carrier.", "error");
+
+    const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
+    if (carrierData && carrierData.profile?.isSet) {
+        const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
+        if (!(carrierData.profile.deliveryTypes & speedBit)) {
+            return showToast("This carrier does not offer the selected delivery speed.", "error");
+        }
+    }
+    
     if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
     if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
-    if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
-    if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
-    if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
-    //if (Number($("#origin").value) === Number($("#destination").value)) return showToast("Origin and destination must be different.", "error");
-    if (Number($("#origin").value) === Number($("#destination").value)) {showToast("💡 Note: Origin and destination are the same. This is allowed for intra-state deliveries.", "info");}
-    if (Number($("#weight").value) <= 0) return showToast("Weight must be greater than zero.", "error");
     
+    if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) {
+        return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
+    }
+    
+    if (types.some((type, index) => type === 6 && !descriptions[index])) {
+        return showToast("Describe every milestone marked Other.", "error");
+    }
+    
+    if (new Set(types).size !== types.length) {
+        return showToast("Each milestone checkpoint type can only be used once.", "error");
+    }
+    
+    if (Number($("#origin").value) === Number($("#destination").value)) {
+        showToast("Intra-state delivery selected.", "info");
+    }
+    
+    if (Number($("#weight").value) <= 0) return showToast("Weight must be greater than zero.", "error");
+    if (!selectedSpeed) return showToast("Select a delivery speed.", "error");
+
     let photoCID = "";
     if (state.parcelPhotos.length > 0) {
         setTransactionState(true, "Uploading parcel photo to IPFS", "This may take a few seconds...");
@@ -1026,7 +1105,7 @@ async function createAgreement(event) {
             setTransactionState(false);
         }
     }
-    
+
     const details = [
         Number($("#origin").value),
         Number($("#destination").value),
@@ -1039,14 +1118,24 @@ async function createAgreement(event) {
     ];
     
     const totalValue = state.web3.utils.toWei(ethValue, "ether");
-    
+
     try {
         const receipt = await sendTransaction(
-            state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details),
+            state.contract.methods.createAgreement(
+                carrier,
+                totalValue,
+                deadline,
+                types,
+                descriptions,
+                percentages,
+                details
+            ),
             {},
             "Create agreement"
         );
+        
         if (!receipt) return;
+ 
         event.target.reset();
         clearParcelPhotos();
         $("#selectedCarrier").value = "";
@@ -1055,8 +1144,14 @@ async function createAgreement(event) {
         addMilestoneRow(5, 70);
         setDefaultDeadline();
         updatePriceSuggestion(true);
+      
+        updateCarrierPicker();
+        
         showSection("agreementsSection");
-    } catch (_) { /* sendTransaction already reports the reason */ }
+        
+    } catch (_) {
+        // Error already handled by sendTransaction
+    }
 }
 
 async function openAgreement(id, showModal = true) {
@@ -1379,7 +1474,7 @@ function renderAgreementDetail(agreement) {
         ` : ""}
         
         <!-- Funded/InProgress (3,4): Shipper can Extend deadline -->
-        ${state.role === ROLE.SHIPPER && [2,5,6,7].includes(agreement.status) ? `
+        ${state.role === ROLE.SHIPPER && ![2,5,6,7].includes(agreement.status) ? `
           <button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>
         ` : ""}
         
@@ -1708,7 +1803,10 @@ function bindEvents() {
   $("#connectButton").addEventListener("click", () => connectWallet(true));
   $$('[data-connect]').forEach(button => button.addEventListener("click", () => connectWallet(true)));
   $("#refreshButton").addEventListener("click", refreshAll);
-  $("#profileAddress").addEventListener("click", async () => { await navigator.clipboard.writeText(state.account); showToast("Wallet address copied."); });
+  $("#profileAddress").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(state.account);
+    showToast("Wallet address copied.");
+  });
   $("#addressForm").addEventListener("submit", async event => {
     event.preventDefault();
     const address = $("#contractAddress").value.trim();
@@ -1721,14 +1819,34 @@ function bindEvents() {
   $("#carrierProfileForm").addEventListener("submit", saveCarrierProfile);
   $("#withdrawCommissionButton").addEventListener("click", withdrawCommission);
   $("#rewardSettingsForm").addEventListener("submit", saveRewardSettings);
-  ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace));
+  ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => {
+    $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace);
+  });
   $("#agreementMonth").addEventListener("change", event => setAgreementMonthFilter(event.target.value));
   $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
   $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
   ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
-    $("#" + id).addEventListener("input", () => { updatePriceSuggestion(false); renderCarriers(); });
-    $("#" + id).addEventListener("change", () => { updatePriceSuggestion(false); renderCarriers(); });
+    $("#" + id).addEventListener("input", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
+    $("#" + id).addEventListener("change", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
   });
+  $("#origin").addEventListener("change", function() {
+    $("#deliverySpeed").value = "";
+    $("#selectedCarrier").value = "";
+    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    updateCarrierPicker();
+  });
+  $("#deliverySpeed").addEventListener("change", function() {
+    $("#selectedCarrier").value = "";
+    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    updateCarrierPicker();
+  });
+
   $("#addMilestoneButton").addEventListener("click", () => addMilestoneRow());
   $("#milestoneRows").addEventListener("input", updatePercentageTotal);
   $("#milestoneRows").addEventListener("change", event => {
@@ -1777,19 +1895,28 @@ function bindEvents() {
   $$('[data-close-photo-lightbox]').forEach(button => button.addEventListener("click", () => $("#photoLightbox").close()));
   $("#actionForm").addEventListener("submit", submitAction);
   $("#actionFields").addEventListener("change", event => {
-    if (event.target.name === "reason") $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
+    if (event.target.name === "reason") {
+      $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
+    }
     if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
   });
   document.addEventListener("change", event => {
-    if (event.target.id === "parcelPhotoFile") addParcelPhotos(event.target);
-    else if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
+    if (event.target.id === "parcelPhotoFile") {
+      addParcelPhotos(event.target);
+    } else if (event.target.matches("[data-image-file]")) {
+      updateImagePreview(event.target);
+    }
   });
   document.addEventListener("error", event => {
     if (!event.target.matches?.("[data-proof-image], [data-image-preview]") || event.target.dataset.fallback) return;
     event.target.dataset.fallback = "1";
     event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
   }, true);
-  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); }));
+  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => {
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
 }
 
 async function init() {
