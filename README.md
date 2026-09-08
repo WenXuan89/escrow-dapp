@@ -100,9 +100,9 @@ ERC20-compatible reputation token:
    ```
 3. Create .env file for Sepolia deployment (optional):
    ```bash
-  MNEMONIC="your twelve word mnemonic here"
-  INFURA_KEY="your_infura_api_key_here"ALCHEMY_KEY="your_alchemy_api_key_here"    # Optional
-  ETHERSCAN_KEY="your_etherscan_api_key"     # Optional for contract verification
+   MNEMONIC="your twelve word mnemonic here"
+   INFURA_KEY="your_infura_api_key_here"ALCHEMY_KEY="your_alchemy_api_key_here"    # Optional
+   ETHERSCAN_KEY="your_etherscan_api_key"     # Optional for contract verification
    ```
 4. Set up Pinata API key (for photo uploads):
    ```bash
