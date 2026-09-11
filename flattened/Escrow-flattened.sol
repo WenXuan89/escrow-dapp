@@ -53,6 +53,7 @@ constructor() {
 
 // File: contracts\Escrow.sol
 
+pragma solidity ^0.8.19;
 contract Escrow {
 
     /* =================
@@ -151,6 +152,7 @@ contract Escrow {
     uint256 public arbitratorEarnings;
     uint256 public completionReward = 100;
     uint256 public disputeWinReward = 100;
+    uint256 public constant MAX_REPUTATION_REWARD = 500;
 
     /* =========
      * EVENTS
@@ -738,12 +740,14 @@ contract Escrow {
 
     function setCompletionReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Completion reward must be greater than zero");
+        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         completionReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }
 
     function setDisputeWinReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Dispute reward must be greater than zero");
+        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         disputeWinReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }

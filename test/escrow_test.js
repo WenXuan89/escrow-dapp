@@ -1173,6 +1173,15 @@ contract('Escrow + ReputationToken', (accounts) => {
       await expectRevert(escrow.setCompletionReward(0, { from: deployer }), 'greater than zero');
       await expectRevert(escrow.setDisputeWinReward(0, { from: deployer }), 'greater than zero');
     });
+
+    it('allows the maximum reputation reward and rejects values above it', async () => {
+      await escrow.setCompletionReward(500, { from: deployer });
+      await escrow.setDisputeWinReward(500, { from: deployer });
+      assert.equal((await escrow.completionReward()).toString(), '500');
+      assert.equal((await escrow.disputeWinReward()).toString(), '500');
+      await expectRevert(escrow.setCompletionReward(501, { from: deployer }), 'exceeds maximum');
+      await expectRevert(escrow.setDisputeWinReward(501, { from: deployer }), 'exceeds maximum');
+    });
   });
  
   // Carrier service profile (location + delivery types offered)

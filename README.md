@@ -47,8 +47,9 @@ Install these before any next step:
 escrow-dapp/
 ├── contracts/
 │ ├── Escrow.sol 
-│ ├── ReputationToken.sol 
-│ └── Escrow-flattened.sol # Flattened contract for Etherscan verification
+│ └── ReputationToken.sol 
+├── flattened/
+│ └── Escrow-flattened.sol # Flattened contract for Etherscan verification (kept out of contracts/ so Truffle doesn't compile it too)
 ├── migrations/
 │ └── 2_deploy_contracts.js 
 ├── src/
@@ -166,12 +167,15 @@ git push origin your-branch-name
 
 **Carrier Marketplace**
 - Searchable, sortable carrier marketplace
-- Smart carrier selection flow: Select origin first → carriers in that origin displayed → choose delivery speed (Standard/Express/Same day) → carriers filter to match both origin AND speed
+- Agreement details are entered before carrier selection, so the picker can filter by location and delivery speed
+- The agreement picker supports name/address search and pagination with up to 12 matching carriers per page
+- Selected carriers have a clear badge and selecting a carrier does not move the user away from the current form position
 
 **Agreement Creation**
 - Route-aware agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
 - Carrier speed validation: Validates that selected carrier offers the chosen delivery speed before agreement creation
 - Editable browser-calculated price suggestion and duplicate-milestone validation
+- Live ETH-to-MYR estimate beside the editable ETH amount (ETH remains the on-chain payment currency)
 - Milestone-based payment structure with configurable percentages
 
 **Agreement Management**
@@ -181,7 +185,8 @@ git push origin your-branch-name
 - Attention filter: Shows agreements requiring immediate action (waiting for acceptance, funding, milestone reporting/verification, disputed, or deadline passed)
 
 **Milestone & Payment Flow**
-- Carrier milestone reporting with optional IPFS CID photo upload; shipper verification and automated payout release 
+- Carrier milestone reporting with optional IPFS CID photo upload; shipper verification and automated payout release
+- Milestone progress and chronological report/verification history are combined in one delivery timeline
 - Status flow: Created → Accepted → Funded → InProgress → Completed
 - Commission system: 5% automatically deducted from each milestone payout and allocated to arbitrator
 - Automatic reputation minting: Reputation tokens awarded upon agreement completion
@@ -199,9 +204,11 @@ git push origin your-branch-name
 
 **Dashboard & Analytics**
 - Role-specific dashboards: Shipper/Carrier (wallet balance, locked escrow, active agreements, completed count) and Arbitrator (open agreements, active disputes, completed agreements, resolved disputes)
-- Chronological milestone report/verification history
-- Recent on-chain account activity feed with event filtering (AgreementCreated, MilestoneReported, DisputeRaised, etc.)
-- Activity feed shows all relevant events including refunds, disputes, and commission collections
+- Role-specific notifications highlight new offers, carrier acceptance, funding, reported milestones, overdue deliveries, and disputes
+- Overview recent agreements and activity include accepted-and-beyond agreements only; unaccepted offers remain in carrier notifications for Accept/Reject action
+- Agreement cards and details label both the Shipper MetaMask wallet and Carrier MetaMask wallet
+- Arbitrator reward settings are limited to 1–500 points in the interface and smart contract
+- Recent on-chain account activity feed with event filtering (AgreementCreated, MilestoneReported, DisputeRaised, etc.), including refunds and commission collections
 - ReputationToken point/star display for carriers
 
 On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.
