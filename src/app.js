@@ -1,6 +1,8 @@
 // import { PINATA_JWT } from './config.js';
+// import { PINATA_JWT } from './config.js';
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
+const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
@@ -8,7 +10,11 @@ const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan"
 const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
 const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
+const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
+const ACTIVE_STATUSES = [3, 4];
+const OPEN_STATUSES = [0, 1, 3, 4];
+const CLOSED_STATUSES = [2, 5, 6, 7];
 const ACTIVE_STATUSES = [3, 4];
 const OPEN_STATUSES = [0, 1, 3, 4];
 const CLOSED_STATUSES = [2, 5, 6, 7];
@@ -63,6 +69,61 @@ const shortAddress = (address, head = 6, tail = 4) => address ? `${address.slice
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
+
+async function uploadToIPFS(file) {
+    if (!file) {
+        console.warn('No file provided to uploadToIPFS');
+        return null;
+    }
+    
+    try {
+        showToast('Uploading to IPFS...', 'info');
+        
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${PINATA_JWT}`  // ← Uses imported key
+            },
+            body: formData,
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Upload failed: ${response.status} - ${errorText}`);
+        }
+
+        const result = await response.json();
+        const cid = result.IpfsHash || result.Hash || result.cid?.['/'] || result.cid?.toString();
+        
+        if (!cid) {
+            throw new Error('No CID returned from IPFS');
+        }
+
+        console.log('Uploaded to IPFS:', cid);
+        console.log('View at:', `${IPFS_GATEWAY}${cid}`);
+        
+        showToast(`Uploaded: ${cid.substring(0, 16)}...`, 'success');
+        return cid;
+        
+    } catch (error) {
+        console.error('IPFS upload failed:', error);
+        if (error.name === 'AbortError') {
+            showToast('Upload timed out. Proceeding without photo.', 'error');
+        } else {
+            showToast('Upload failed. Proceeding without photo.', 'error');
+        }
+        return null;
+    }
+}
 
 async function uploadToIPFS(file) {
     if (!file) {
@@ -205,6 +266,7 @@ function renderAgreementFilterState(resultCount) {
     const label = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
     return void (summary.textContent = `${countLabel} with deadline in ${label}`);
   }
+  summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
   summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
 }
 
@@ -512,9 +574,11 @@ function configureDashboardForRole() {
   const isShipper = state.role === ROLE.SHIPPER;
   const isArbitrator = state.role === ROLE.ARBITRATOR;
   
+  
   $$(".shipper-only").forEach(node => node.classList.toggle("role-hidden", !isShipper));
   $$(".carrier-only").forEach(node => node.classList.toggle("role-hidden", state.role !== ROLE.CARRIER));
   $$(".arbitrator-only").forEach(node => node.classList.toggle("role-hidden", !isArbitrator));
+  
   
   $("#profileRole").textContent = roleLabel(state.role);
   $("#profileAddress").textContent = shortAddress(state.account, 8, 6);
@@ -531,6 +595,7 @@ function configureDashboardForRole() {
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
   
+  
   state.filter = "all";
   resetAgreementDateFilters(false);
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
@@ -539,12 +604,15 @@ function configureDashboardForRole() {
   $("#statOneHelp").textContent = "Connected account";
   $("#statTwoLabel").textContent = "Locked in escrow";
   $("#statTwoHelp").textContent = "Total escrow balance";
+  $("#statTwoLabel").textContent = "Locked in escrow";
+  $("#statTwoHelp").textContent = "Total escrow balance";
   $("#statThreeLabel").textContent = "Active agreements";
   $("#statThreeHelp").textContent = "Funded or in progress";
   $("#statFourLabel").textContent = "Completed";
   $("#statFourHelp").textContent = "Successfully settled";
 
   if (isArbitrator) {
+    $("#statOneLabel").textContent = "Open agreements";
     $("#statOneLabel").textContent = "Open agreements";
     $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
     $("#statTwoLabel").textContent = "Active disputes";
@@ -675,6 +743,15 @@ async function refreshActivity() {
   } catch (_) { 
     state.activity = []; 
   }
+    
+    state.activity = recent
+      .map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 }))
+      .sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber);
+    
+    renderActivity();
+  } catch (_) { 
+    state.activity = []; 
+  }
 }
 
 async function agreementIdsForCurrentUser() {
@@ -786,9 +863,52 @@ function needsAttention(agreement) {
   }
   
   return false;
+
+  if (agreement.status === 7) return true;
+  if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) return true;
+  
+  if (state.role === ROLE.SHIPPER) {
+    if (agreement.status === 0) return true;
+    
+    if (agreement.status === 1) return true;
+
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => m.reported && !m.completed)) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+
+  if (state.role === ROLE.CARRIER) {
+
+    if (agreement.status === 0) return true;
+
+    if (agreement.status === 1) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+  return false;
 }
 
 function renderDashboard() {
+  const created = state.agreements.filter(a => a.status === 0).length;
+  const accepted = state.agreements.filter(a => a.status === 1).length;
+  const rejected = state.agreements.filter(a => a.status === 2).length;
+  const funded = state.agreements.filter(a => a.status === 3).length;
+  const inProgress = state.agreements.filter(a => a.status === 4).length;
+  const completed = state.agreements.filter(a => a.status === 5).length;
+  const refunded = state.agreements.filter(a => a.status === 6).length;
+  const disputed = state.agreements.filter(a => a.status === 7).length;
+
+  const active = funded + inProgress;
+  const open = created + accepted + funded + inProgress;
+  const total = state.agreements.length;
+  const activeDisputes = state.agreements.filter(a => a.status === 7).length;
+  const resolvedDisputes = state.agreements.filter(a => a.disputeReason > 0 && a.status !== 7).length;
+  
   const created = state.agreements.filter(a => a.status === 0).length;
   const accepted = state.agreements.filter(a => a.status === 1).length;
   const rejected = state.agreements.filter(a => a.status === 2).length;
@@ -810,7 +930,21 @@ function renderDashboard() {
   }, state.demo ? 0 : 0n);
   
   if (state.role !== ROLE.ARBITRATOR) {
+  
+  if (state.role !== ROLE.ARBITRATOR) {
     $("#escrowBalance").textContent = formatEth(totalEscrow);
+    $("#activeCount").textContent = active;
+    $("#completedCount").textContent = completed;
+    $("#agreementNavCount").textContent = total;
+  }
+
+  if (state.role === ROLE.ARBITRATOR) {
+
+    $("#walletBalance").textContent = open;
+    $("#escrowBalance").textContent = activeDisputes;
+    $("#activeCount").textContent = completed;
+    $("#completedCount").textContent = resolvedDisputes;
+    $("#agreementNavCount").textContent = activeDisputes + resolvedDisputes;
     $("#activeCount").textContent = active;
     $("#completedCount").textContent = completed;
     $("#agreementNavCount").textContent = total;
@@ -884,6 +1018,8 @@ function agreementMatchesFilter(agreement) {
     matchesStatus = agreement.disputeReason > 0;
     if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
     if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
+    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
+    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
   } else {
     if (state.filter === "active") matchesStatus = OPEN_STATUSES.includes(agreement.status);
     if (state.filter === "attention") matchesStatus = needsAttention(agreement);
@@ -925,6 +1061,21 @@ function renderAgreementGrid() {
 }
 
 function renderCarriers() {
+    const quick = $("#carrierQuickList");
+    const picker = $("#carrierPicker");
+    const marketplace = $("#carrierMarketplace");
+    
+    if (!quick || !picker || !marketplace) return;
+    
+    if (!state.carriers.length) {
+        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
+        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
+        marketplace.innerHTML = picker.innerHTML;
+        return;
+    }
+    quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
+    updateCarrierPicker();
+    renderMarketplace();
     const quick = $("#carrierQuickList");
     const picker = $("#carrierPicker");
     const marketplace = $("#carrierMarketplace");
@@ -1454,6 +1605,7 @@ function renderAgreementDetail(agreement) {
   
   const details = agreement.details;
   
+  
   $("#agreementDetail").innerHTML = `
     <div class="detail-head">
       <span class="section-label">On-chain agreement</span>
@@ -1629,7 +1781,61 @@ function renderAgreementDetail(agreement) {
           <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
           <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
         ` : ""}
+        <!-- Created (0): Carrier can Accept/Reject -->
+        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `
+          <button class="button button-primary" type="button" data-action="accept">Accept agreement</button>
+          <button class="button button-danger" type="button" data-action="reject">Reject agreement</button>
+        ` : ""}
+        
+        <!-- Created (0): Shipper waits -->
+        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `
+          <span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>
+        ` : ""}
+        
+        <!-- Accepted (1): Shipper can FUND -->
+        ${agreement.status === 1 && state.role === ROLE.SHIPPER ? `
+          <button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>
+        ` : ""}
+        
+        <!-- Accepted (1): Carrier waits -->
+        ${agreement.status === 1 && state.role === ROLE.CARRIER ? `
+          <span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>
+        ` : ""}
+        
+        <!-- Rejected (2) -->
+        ${agreement.status === 2 ? `
+          <span class="action-note">This agreement was rejected and cannot be funded.</span>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Extend deadline -->
+        ${state.role === ROLE.SHIPPER && ![2,5,6,7].includes(agreement.status) ? `
+          <button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Participants can Dispute -->
+        ${canDispute ? `
+          <button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Refund if deadline passed -->
+        ${canRefund ? `
+          <button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Participants can Submit Evidence -->
+        ${agreement.status === 7 && isParticipant ? `
+          <button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Arbitrator can Resolve -->
+        ${agreement.status === 7 && state.role === ROLE.ARBITRATOR ? `
+          <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
+          <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
+        ` : ""}
       </div>
+    </div>
+  `;
+  
     </div>
   `;
   
@@ -1687,6 +1893,144 @@ async function handleDetailAction(action, milestoneIndex) {
 }
 
 async function submitAction(event) {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const { action, agreementId, milestoneIndex } = state.pendingAction || {};
+    
+    if (state.demo) {
+        $("#actionDialog").close();
+        return showToast("Transactions are disabled in preview mode.", "error");
+    }
+    
+    try {
+
+        if (action === "report") {
+            let proofCID = "";
+            const fileInput = document.querySelector('[name="proofCID"]');
+
+            if (fileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading proof to IPFS", "Uploading milestone proof photo...");
+                try {
+                    proofCID = (await uploadToIPFS(fileInput.files[0])) || "";
+                    if (proofCID) {
+                        console.log('Milestone proof uploaded:', proofCID);
+                        showToast(`Proof uploaded: ${proofCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Proof upload failed:', error);
+                    showToast('Proof photo upload failed. Proceeding without photo.', 'error');
+                    proofCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            await sendTransaction(
+                state.contract.methods.reportMilestone(agreementId, milestoneIndex, proofCID),
+                {},
+                "Report milestone"
+            );
+        }
+
+        if (action === "extend") {
+            const agreement = state.agreements.find(item => item.id === Number(agreementId));
+            const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
+            if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) {
+                return showToast("Choose a deadline later than the current deadline.", "error");
+            }
+            await sendTransaction(
+                state.contract.methods.extendDeadline(agreementId, newDeadline),
+                {},
+                "Extend deadline"
+            );
+        }
+        
+        if (action === "dispute") {
+            const reason = Number(data.get("reason"));
+            const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
+            const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
+            
+            let evidenceCID = "";
+            const evidenceFileInput = document.querySelector('[name="evidenceCID"]');
+            
+            if (evidenceFileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading evidence to IPFS", "Uploading dispute evidence photo...");
+                try {
+                    evidenceCID = (await uploadToIPFS(evidenceFileInput.files[0])) || "";
+                    if (evidenceCID) {
+                        console.log('Evidence uploaded:', evidenceCID);
+                        showToast(`Evidence uploaded: ${evidenceCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Evidence upload failed:', error);
+                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    evidenceCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            if (reason === 5 && !otherReason) {
+                return showToast("Enter the other dispute reason.", "error");
+            }
+            
+            await sendTransaction(
+                state.contract.methods.raiseDispute(agreementId, reason, otherReason),
+                {},
+                "Raise dispute"
+            );
+            
+            if (evidenceDescription || evidenceCID) {
+                await sendTransaction(
+                    state.contract.methods.submitEvidence(
+                        agreementId,
+                        evidenceDescription || "Evidence submitted",
+                        evidenceCID
+                    ),
+                    {},
+                    "Submit dispute evidence"
+                );
+            }
+        }
+
+        if (action === "evidence") {
+            const description = String(data.get("description") || "").trim();
+            if (!description) {
+                return showToast("Evidence description is required.", "error");
+            }
+            
+            let fileCID = "";
+            const fileInput = document.querySelector('[name="fileCID"]');
+
+            if (fileInput?.files?.length > 0) {
+                setTransactionState(true, "Uploading evidence to IPFS", "Uploading evidence photo...");
+                try {
+                    fileCID = (await uploadToIPFS(fileInput.files[0])) || "";
+                    if (fileCID) {
+                        console.log('Evidence uploaded:', fileCID);
+                        showToast(`Evidence uploaded: ${fileCID.substring(0, 12)}...`, 'success');
+                    }
+                } catch (error) {
+                    console.error('Evidence upload failed:', error);
+                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    fileCID = "";
+                } finally {
+                    setTransactionState(false);
+                }
+            }
+            
+            await sendTransaction(
+                state.contract.methods.submitEvidence(agreementId, description, fileCID),
+                {},
+                "Submit evidence"
+            );
+        }
+        
+        $("#actionDialog").close();
+        
+    } catch (_) {
+        // Error already handled by sendTransaction
+    }
     event.preventDefault();
     const data = new FormData(event.target);
     const { action, agreementId, milestoneIndex } = state.pendingAction || {};
@@ -1939,6 +2283,10 @@ function bindEvents() {
     await navigator.clipboard.writeText(state.account);
     showToast("Wallet address copied.");
   });
+  $("#profileAddress").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(state.account);
+    showToast("Wallet address copied.");
+  });
   $("#addressForm").addEventListener("submit", async event => {
     event.preventDefault();
     const address = $("#contractAddress").value.trim();
@@ -1963,6 +2311,14 @@ function bindEvents() {
   $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
   $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
   ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
+    $("#" + id).addEventListener("input", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
+    $("#" + id).addEventListener("change", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
     $("#" + id).addEventListener("input", () => {
       updatePriceSuggestion(false);
       renderCarriers();
@@ -2041,9 +2397,17 @@ function bindEvents() {
     if (event.target.name === "reason") {
       $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
     }
+    if (event.target.name === "reason") {
+      $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
+    }
     if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
   });
   document.addEventListener("change", event => {
+    if (event.target.id === "parcelPhotoFile") {
+      addParcelPhotos(event.target);
+    } else if (event.target.matches("[data-image-file]")) {
+      updateImagePreview(event.target);
+    }
     if (event.target.id === "parcelPhotoFile") {
       addParcelPhotos(event.target);
     } else if (event.target.matches("[data-image-file]")) {
@@ -2055,6 +2419,11 @@ function bindEvents() {
     event.target.dataset.fallback = "1";
     event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
   }, true);
+  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => {
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
   [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => {
     dialog.addEventListener("click", event => {
       if (event.target === dialog) dialog.close();

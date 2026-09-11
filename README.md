@@ -47,8 +47,9 @@ Install these before any next step:
 escrow-dapp/
 ├── contracts/
 │ ├── Escrow.sol 
-│ ├── ReputationToken.sol 
-│ └── Escrow-flattened.sol # Flattened contract for Etherscan verification
+│ └── ReputationToken.sol 
+├── flattened/
+│ └── Escrow-flattened.sol # Flattened contract for Etherscan verification (kept out of contracts/ so Truffle doesn't compile it too)
 ├── migrations/
 │ └── 2_deploy_contracts.js 
 ├── src/
@@ -207,6 +208,7 @@ git push origin your-branch-name
 - Overview recent agreements and activity include accepted-and-beyond agreements only; unaccepted offers remain in carrier notifications for Accept/Reject action
 - Agreement cards and details label both the Shipper MetaMask wallet and Carrier MetaMask wallet
 - Arbitrator reward settings are limited to 1–500 points in the interface and smart contract
+- Recent on-chain account activity feed with event filtering (AgreementCreated, MilestoneReported, DisputeRaised, etc.), including refunds and commission collections
 - ReputationToken point/star display for carriers
 
 On Windows PowerShell, if `npm.ps1` is blocked by the execution policy, use `npm.cmd install`, `npm.cmd run compile`, and `npm.cmd run dev`. This runs the same npm commands without changing the computer's security policy.

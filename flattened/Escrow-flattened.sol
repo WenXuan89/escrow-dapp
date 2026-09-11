@@ -53,6 +53,7 @@ constructor() {
 
 // File: contracts\Escrow.sol
 
+pragma solidity ^0.8.19;
 contract Escrow {
 
     /* =================

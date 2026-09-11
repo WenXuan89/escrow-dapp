@@ -8,6 +8,7 @@ lerna-debug.log*
 
 # Truffle build artifacts
 build/
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
@@ -87,9 +88,6 @@ dist
 
 # Gatsby files
 .cache/
-# Comment in the public line in if your project uses Gatsby and not Next.js
-# https://nextjs.org/blog/next-9-1#public-directory-support
-# public
 
 # vuepress build output
 .vuepress/dist
@@ -143,3 +141,21 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Environment variables (contains MNEMONIC, INFURA_KEY)
+.env
+
+# Pinata API key (contains JWT token)
+src/config.js
+
+# VS Code settings
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Deployment addresses (optional - keep or ignore)
+deployed-addresses.json
+addresses.json"src/config.js" 
+"desktop.ini" 
