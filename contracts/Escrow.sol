@@ -97,10 +97,10 @@ contract Escrow {
 
     uint256 public agreementCount;
     uint256 public constant COMMISSION_PERCENT = 5;
-    uint256 public constant MAX_REPUTATION_REWARD = 500;
     uint256 public arbitratorEarnings;
     uint256 public completionReward = 100;
     uint256 public disputeWinReward = 100;
+    uint256 public constant MAX_REPUTATION_REWARD = 500;
 
     /* =========
      * EVENTS
@@ -688,14 +688,14 @@ contract Escrow {
 
     function setCompletionReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Completion reward must be greater than zero");
-        require(newReward <= MAX_REPUTATION_REWARD, "Completion reward exceeds maximum");
+        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         completionReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }
 
     function setDisputeWinReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Dispute reward must be greater than zero");
-        require(newReward <= MAX_REPUTATION_REWARD, "Dispute reward exceeds maximum");
+        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         disputeWinReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }

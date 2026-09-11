@@ -100,7 +100,7 @@
         </article>
         <article><b>02</b>
           <h3>Report progress</h3>
-          <p>The assigned carrier reports each checkpoint so the shipper can review delivery progress.</p>
+          <p>The assigned carrier reports each checkpoint and can preview a supporting delivery photo.</p>
         </article>
         <article><b>03</b>
           <h3>Verify & release</h3>
@@ -201,9 +201,9 @@
                   type="button">Withdraw commission</button></div>
               <form id="rewardSettingsForm" class="reward-form">
                 <label>Completed-delivery reward<input id="completionRewardInput" type="number" min="1" max="500" step="1"
-                    required><small>Enter 1–500 points. Default: 100.</small></label>
+                    required><small>Enter 1–500 reputation points for the carrier.</small></label>
                 <label>Carrier dispute-win reward<input id="disputeRewardInput" type="number" min="1" max="500" step="1"
-                    required><small>Enter 1–500 points. Default: 100.</small></label>
+                    required><small>Enter 1–500 points when a dispute ruling favours the carrier.</small></label>
                 <button class="button button-secondary" type="submit">Save reward settings</button>
               </form>
             </div>
@@ -213,12 +213,12 @@
             <div class="panel span-two notification-panel">
               <div class="panel-heading">
                 <div><span class="section-label">Notifications</span>
-                  <h3>Updates that need your attention <b id="notificationCount" class="notification-count hidden">0</b></h3>
+                  <h3><span id="notificationHeading">Delivery updates and next actions</span> <b id="notificationCount" class="notification-count hidden">0</b></h3>
                 </div>
               </div>
               <div id="notificationList" class="notification-list" aria-live="polite"></div>
             </div>
-            <div class="panel span-two">
+            <div class="panel span-two recent-panel">
               <div class="panel-heading">
                 <div><span class="section-label">Accepted work</span>
                   <h3>Recent accepted agreements</h3>
@@ -307,15 +307,15 @@
           <div class="section-heading compact">
             <div><span class="section-label">New logistics escrow</span>
               <h2>Create an agreement</h2>
-              <p>Enter the delivery details, choose a matching carrier and divide the payment across milestones totalling 100%.</p>
+              <p>Enter the delivery details first, then choose a matching carrier and split the payout across milestones totaling 100%.</p>
             </div>
           </div>
           <form id="agreementForm" class="agreement-form">
             <div class="form-panel split-fields">
               <div class="form-step"><b>1</b>
                 <div>
-                  <h3>Shipment and agreement details</h3>
-                  <p>Tell us what is being delivered. We will use the pickup location and speed to find suitable carriers.</p>
+                  <h3>Agreement details</h3>
+                  <p>Tell carriers what needs to be delivered. The ETH amount is locked only after the carrier accepts.</p>
                 </div>
               </div>
               <label>Origin<select id="origin" name="origin" required></select></label>
@@ -346,21 +346,23 @@
                   <option value="2">Protected</option>
                   <option value="3">Premium</option>
                 </select></label>
+              <div class="image-input-card full-field" data-image-input>
+                <div><strong>Parcel photos (optional)</strong><small>Select one or more photos. Click a preview to
+                    enlarge it, or × to remove it and choose again.</small></div>
+                <label class="file-button">Choose photos<input id="parcelPhotoFile" type="file" accept="image/*"
+                    multiple></label>
+                <span id="parcelPhotoCount" class="photo-count">No photos selected</span>
+                <div id="parcelPhotoGrid" class="selected-photo-grid hidden" aria-live="polite"></div>
+              </div>
               <div class="value-deadline-row full-field">
-                <div class="field-group">
-                  <label for="totalValue">Total agreement value</label>
-                  <div class="money-input"><span aria-hidden="true">Ξ</span><input id="totalValue" name="totalValue"
-                      type="number" min="0.000001" step="0.000001" placeholder="0.015" required><b>ETH</b></div>
+                <label>Total agreement value
+                  <span class="money-input"><span aria-hidden="true">Ξ</span><input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="0.015" required><b>ETH</b></span>
                   <strong id="myrEstimate" class="myr-estimate">Enter an ETH amount to see MYR</strong>
                   <small id="priceSuggestion" class="field-help">Suggested price appears as shipment details change.</small>
                   <small id="myrRateStatus" class="rate-status" aria-live="polite">Loading the live ETH/MYR rate…</small>
-                  <button id="refreshRateButton" class="text-button rate-refresh" type="button">Refresh exchange rate</button>
-                </div>
-                <div class="field-group">
-                  <label for="deadline">Delivery deadline</label>
-                  <input id="deadline" name="deadline" type="datetime-local" required>
-                  <small class="field-help">Choose a future date and time that gives the carrier enough time to deliver.</small>
-                </div>
+                  <button id="refreshRateButton" class="text-button rate-refresh" type="button">Refresh MYR rate</button>
+                </label>
+                <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required><small class="field-help">Choose a future date and time.</small></label>
               </div>
             </div>
             <div class="form-panel">
@@ -372,12 +374,11 @@
               </div>
               <input id="selectedCarrier" name="carrier" type="hidden" required>
               <div id="carrierPickerTools" class="carrier-picker-tools">
-                <label for="carrierPickerSearch">Find a carrier</label>
-                <input id="carrierPickerSearch" type="search" placeholder="Search by company name or wallet address">
-                <small id="carrierPickerSummary">Matching carriers will appear here.</small>
+                <label>Find a carrier<input id="carrierPickerSearch" type="search" placeholder="Search by company name or wallet address"></label>
+                <small id="carrierPickerSummary" aria-live="polite">Enter the shipment details first.</small>
               </div>
               <div id="carrierPicker" class="carrier-picker"></div>
-              <div id="carrierPickerPagination" class="picker-pagination hidden">
+              <div id="carrierPickerPagination" class="carrier-pagination hidden" aria-label="Carrier pages">
                 <button id="carrierPickerPrev" class="button button-secondary" type="button">← Previous</button>
                 <span id="carrierPickerPage">Page 1 of 1</span>
                 <button id="carrierPickerNext" class="button button-secondary" type="button">Next →</button>
@@ -429,6 +430,7 @@
                     value="1">Standard</label><label class="check-label"><input name="deliveryType" type="checkbox"
                     value="2">Express</label><label class="check-label"><input name="deliveryType" type="checkbox"
                     value="4">Same day</label>
+                <small class="fieldset-help">You may select one delivery type or several types at the same time.</small>
               </fieldset><button class="button button-primary" type="submit">Save carrier profile</button>
             </form>
             <article id="backendNotice" class="panel compatibility-card arbitrator-only"><span
@@ -458,6 +460,12 @@
           data-close-action-dialog>Cancel</button><button id="actionSubmit" class="button button-primary"
           type="submit">Confirm</button></div>
     </form>
+  </dialog>
+
+  <dialog id="photoLightbox" class="photo-lightbox">
+    <button class="dialog-close" type="button" data-close-photo-lightbox aria-label="Close enlarged photo">×</button>
+    <img id="photoLightboxImage" alt="Selected parcel photo enlarged">
+    <p id="photoLightboxCaption"></p>
   </dialog>
 
   <div id="transactionOverlay" class="transaction-overlay hidden" role="status" aria-live="polite">
