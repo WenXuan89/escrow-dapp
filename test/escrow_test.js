@@ -22,13 +22,13 @@ const DISPUTE_OTHER = 5;
 // AgreementStatus enum (Accepted/Rejected appended at the end, so
 // Created..Disputed keep their original 0-5 values)
 const STATUS_CREATED = '0';
-const STATUS_FUNDED = '1';
-const STATUS_INPROGRESS = '2';
-const STATUS_COMPLETED = '3';
-const STATUS_REFUNDED = '4';
-const STATUS_DISPUTED = '5';
-const STATUS_ACCEPTED = '6';
-const STATUS_REJECTED = '7';
+const STATUS_ACCEPTED = '1';
+const STATUS_REJECTED = '2';
+const STATUS_FUNDED = '3';
+const STATUS_INPROGRESS = '4';
+const STATUS_COMPLETED = '5';
+const STATUS_REFUNDED = '6';
+const STATUS_DISPUTED = '7';
  
 // 5% arbitrator commission, matching COMMISSION_PERCENT in the contract
 function withCommission(amountBN) {
@@ -1172,6 +1172,15 @@ contract('Escrow + ReputationToken', (accounts) => {
     it('rejects zero-value reputation reward settings', async () => {
       await expectRevert(escrow.setCompletionReward(0, { from: deployer }), 'greater than zero');
       await expectRevert(escrow.setDisputeWinReward(0, { from: deployer }), 'greater than zero');
+    });
+
+    it('limits both reputation reward settings to 500 points', async () => {
+      await escrow.setCompletionReward(500, { from: deployer });
+      await escrow.setDisputeWinReward(500, { from: deployer });
+      assert.equal((await escrow.completionReward()).toString(), '500');
+      assert.equal((await escrow.disputeWinReward()).toString(), '500');
+      await expectRevert(escrow.setCompletionReward(501, { from: deployer }), 'exceeds maximum');
+      await expectRevert(escrow.setDisputeWinReward(501, { from: deployer }), 'exceeds maximum');
     });
   });
  

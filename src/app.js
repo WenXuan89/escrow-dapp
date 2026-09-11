@@ -1,20 +1,23 @@
-/* global Web3 */
-
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
-const STATUS = ["Created", "Funded", "In progress", "Completed", "Refunded", "Disputed", "Accepted", "Rejected"];
+const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
 const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
 const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
-const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day", "Scheduled"];
+const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
-const ACTIVE_STATUSES = [1, 2];
-const OPEN_STATUSES = [0, 1, 2, 6];
-const CLOSED_STATUSES = [3, 4, 7];
+const ACTIVE_STATUSES = [3, 4];
+const OPEN_STATUSES = [0, 1, 3, 4];
+const CLOSED_STATUSES = [2, 5, 6, 7];
 const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const REWARD_MIN = 1;
+const REWARD_MAX = 500;
+const CARRIER_PAGE_SIZE = 12;
+const RECENT_AGREEMENT_STATUSES = [1, 3, 4, 5, 6, 7];
+const ETH_MYR_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=myr&include_last_updated_at=true";
 
 const state = {
   web3: null,
@@ -37,7 +40,9 @@ const state = {
   arbitratorEarnings: "0",
   completionReward: "100",
   disputeWinReward: "100",
-  parcelPhotos: [],
+  ethMyrRate: null,
+  ethMyrUpdatedAt: null,
+  carrierPickerPage: 1,
   currentAgreementId: null,
   pendingAction: null,
   filter: "all",
@@ -141,7 +146,7 @@ function renderAgreementFilterState(resultCount) {
     const label = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
     return void (summary.textContent = `${countLabel} with deadline in ${label}`);
   }
-  summary.textContent = state.filter === "closed" ? `${countLabel} · latest deadline first` : countLabel;
+  summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
 }
 
 function formatEth(wei, precision = 4) {
@@ -152,6 +157,77 @@ function formatEth(wei, precision = 4) {
     return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: precision })} ETH`;
   } catch (_) {
     return "—";
+  }
+}
+
+function formatMyrFromEth(ethValue) {
+  const amount = Number(ethValue);
+  if (!state.ethMyrRate || !Number.isFinite(amount)) return "RM —";
+  return new Intl.NumberFormat("en-MY", {
+    style: "currency",
+    currency: "MYR",
+    maximumFractionDigits: 2
+  }).format(amount * state.ethMyrRate);
+}
+
+function formatMyrFromWei(wei) {
+  if (!state.ethMyrRate || wei === undefined || wei === null) return "";
+  try {
+    const eth = state.demo ? Number(wei) : Number(state.web3.utils.fromWei(String(wei), "ether"));
+    return formatMyrFromEth(eth);
+  } catch (_) {
+    return "";
+  }
+}
+
+function updateMyrEstimate() {
+  const value = Number($("#totalValue")?.value || 0);
+  const estimate = $("#myrEstimate");
+  const status = $("#myrRateStatus");
+  if (estimate) estimate.textContent = value > 0 ? `Approximately ${formatMyrFromEth(value)}` : "Enter an ETH amount to see MYR";
+  if (!status) return;
+  if (!state.ethMyrRate) {
+    status.textContent = "Live ETH/MYR rate is temporarily unavailable. You can still create the agreement.";
+    return;
+  }
+  const updated = state.ethMyrUpdatedAt ? new Date(state.ethMyrUpdatedAt * 1000) : new Date();
+  status.textContent = `1 ETH ≈ ${formatMyrFromEth(1)} · updated ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(updated)}`;
+}
+
+function loadCachedEthMyrRate() {
+  try {
+    const cached = JSON.parse(localStorage.getItem("chainfreight:eth-myr") || "null");
+    if (cached && Number(cached.rate) > 0) {
+      state.ethMyrRate = Number(cached.rate);
+      state.ethMyrUpdatedAt = Number(cached.updatedAt) || null;
+    }
+  } catch (_) { /* ignore an invalid cache */ }
+  updateMyrEstimate();
+}
+
+async function refreshEthMyrRate(showMessage = false) {
+  const button = $("#refreshRateButton");
+  if (button) button.disabled = true;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(ETH_MYR_ENDPOINT, { cache: "no-store", signal: controller.signal });
+    clearTimeout(timeout);
+    if (!response.ok) throw new Error("Rate service unavailable");
+    const data = await response.json();
+    const rate = Number(data?.ethereum?.myr);
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error("Invalid ETH/MYR rate");
+    state.ethMyrRate = rate;
+    state.ethMyrUpdatedAt = Number(data?.ethereum?.last_updated_at) || Math.floor(Date.now() / 1000);
+    localStorage.setItem("chainfreight:eth-myr", JSON.stringify({ rate, updatedAt: state.ethMyrUpdatedAt }));
+    updateMyrEstimate();
+    if (state.agreements.length) renderDashboard();
+    if (showMessage) showToast("The ETH to MYR estimate has been updated.");
+  } catch (_) {
+    updateMyrEstimate();
+    if (showMessage) showToast("The live MYR rate could not be updated. Your agreement can still be created in ETH.", "error");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -202,13 +278,46 @@ function showToast(message, type = "success") {
   setTimeout(() => toast.remove(), 4800);
 }
 
+function showValidationError(message, selector) {
+  showToast(message, "error");
+  const field = selector ? $(selector) : null;
+  if (field) {
+    field.focus({ preventScroll: true });
+    field.scrollIntoView({ behavior: "smooth", block: "center" });
+    field.classList.add("input-error");
+    setTimeout(() => field.classList.remove("input-error"), 3500);
+  }
+  return false;
+}
+
 function readableError(error) {
   const raw = error?.message || String(error || "Unknown error");
   const revert = raw.match(/revert(?:ed)?(?: with reason string)?[\s:'"]+([^"\n]+)/i);
-  if (error?.code === 4001 || /user denied|user rejected/i.test(raw)) return "The wallet request was rejected.";
-  if (/insufficient funds/i.test(raw)) return "This wallet does not have enough ETH for the transaction and gas.";
-  if (revert) return revert[1].replace(/["'}].*$/, "").trim();
-  return raw.length > 180 ? `${raw.slice(0, 177)}…` : raw;
+  if (error?.code === 4001 || /user denied|user rejected/i.test(raw)) return "You cancelled the request in MetaMask. No changes were made.";
+  if (/insufficient funds/i.test(raw)) return "This wallet does not have enough ETH. Add test ETH for both the payment and the transaction fee.";
+  if (/network|connection|failed to fetch|disconnected/i.test(raw)) return "The app cannot reach the selected blockchain network. Check that Ganache is running and MetaMask is using the same network.";
+  const reason = revert ? revert[1].replace(/["'}].*$/, "").trim() : "";
+  const friendly = [
+    [/Already registered/i, "This wallet already has a role. A wallet cannot register twice."],
+    [/Not registered/i, "Register this wallet as a shipper or carrier before continuing."],
+    [/Only Shipper/i, "Only the shipper for this agreement can perform this action."],
+    [/Only.*Carrier|agreement's carrier/i, "Only the carrier assigned to this agreement can perform this action."],
+    [/Only arbitrator/i, "Only the arbitrator wallet can perform this action."],
+    [/not.*accepted|required status/i, "This action is not available at the agreement's current stage. Refresh the page and check its status."],
+    [/Deadline has passed/i, "The delivery deadline has passed. Use the available refund or dispute option."],
+    [/new deadline/i, "Choose a new deadline that is later than the current deadline."],
+    [/percentages must sum to 100/i, "Milestone payouts must add up to exactly 100%."],
+    [/Origin and destination must differ/i, "Pickup and delivery locations must be different."],
+    [/Must fund exact total value/i, "The payment must exactly match the total value shown in the agreement."],
+    [/No commission/i, "There is no commission available to withdraw."],
+    [/reward.*greater than zero/i, `Enter a reward from ${REWARD_MIN} to ${REWARD_MAX} points.`],
+    [/reward.*maximum|Reward exceeds/i, `The maximum reward is ${REWARD_MAX} points.`]
+  ];
+  const match = friendly.find(([pattern]) => pattern.test(reason || raw));
+  if (match) return match[1];
+  if (reason) return `The contract could not complete this action: ${reason}`;
+  console.error("Blockchain request failed:", error);
+  return "The action could not be completed. Check MetaMask, Ganache and the agreement status, then try again.";
 }
 
 function setTransactionState(visible, title = "Confirm in your wallet", message = "Waiting for transaction confirmation…") {
@@ -222,10 +331,10 @@ async function sendTransaction(method, options, label) {
     showToast(`${label} is disabled in preview mode.`, "error");
     return null;
   }
-  setTransactionState(true, "Confirm in your wallet", `${label}: approve the transaction in MetaMask.`);
+  setTransactionState(true, "Open MetaMask to continue", `${label}: review the details, then press Confirm in MetaMask.`);
   try {
     const receipt = await method.send({ from: state.account, ...options });
-    setTransactionState(true, "Transaction confirmed", `${label} was recorded on-chain.`);
+    setTransactionState(true, "Transaction confirmed", `${label} was saved successfully.`);
     await refreshAll();
     showToast(`${label} completed.`);
     return receipt;
@@ -353,9 +462,11 @@ async function routeConnectedUser() {
 function configureDashboardForRole() {
   const isShipper = state.role === ROLE.SHIPPER;
   const isArbitrator = state.role === ROLE.ARBITRATOR;
+  
   $$(".shipper-only").forEach(node => node.classList.toggle("role-hidden", !isShipper));
   $$(".carrier-only").forEach(node => node.classList.toggle("role-hidden", state.role !== ROLE.CARRIER));
   $$(".arbitrator-only").forEach(node => node.classList.toggle("role-hidden", !isArbitrator));
+  
   $("#profileRole").textContent = roleLabel(state.role);
   $("#profileAddress").textContent = shortAddress(state.account, 8, 6);
   $("#profileAvatar").textContent = state.account.slice(2, 4).toUpperCase();
@@ -369,23 +480,22 @@ function configureDashboardForRole() {
   $("#activeFilterButton").textContent = isArbitrator ? "Active" : "Active";
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
+  
   state.filter = "all";
   resetAgreementDateFilters(false);
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
 
-  // Restore the participant dashboard labels whenever MetaMask changes from
-  // the arbitrator account to a shipper or carrier account.
   $("#statOneLabel").textContent = "Wallet balance";
   $("#statOneHelp").textContent = "Connected account";
-  $("#statTwoLabel").textContent = "Locked in my escrows";
-  $("#statTwoHelp").textContent = "Funded minus released";
+  $("#statTwoLabel").textContent = "Locked in escrow";
+  $("#statTwoHelp").textContent = "Total escrow balance";
   $("#statThreeLabel").textContent = "Active agreements";
   $("#statThreeHelp").textContent = "Funded or in progress";
   $("#statFourLabel").textContent = "Completed";
   $("#statFourHelp").textContent = "Successfully settled";
 
   if (isArbitrator) {
-    $("#statOneLabel").textContent = "Active agreements";
+    $("#statOneLabel").textContent = "Open agreements";
     $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
     $("#statTwoLabel").textContent = "Active disputes";
     $("#statTwoHelp").textContent = "Awaiting an on-chain ruling";
@@ -399,7 +509,8 @@ function configureDashboardForRole() {
 async function refreshAll() {
   if (!state.contract && !state.demo) return;
   try {
-    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements(), refreshProfile(), refreshActivity(), refreshArbitratorControls()]);
+    await Promise.all([refreshBalances(), refreshCarriers(), refreshAgreements(), refreshProfile(), refreshArbitratorControls()]);
+    await refreshActivity();
     renderDashboard();
     if (state.currentAgreementId !== null && $("#agreementDialog").open) await openAgreement(state.currentAgreementId, false);
   } catch (error) {
@@ -490,15 +601,36 @@ async function refreshArbitratorControls() {
 async function refreshActivity() {
   if (state.demo) return;
   try {
-    const events = await state.contract.getPastEvents("allEvents", { fromBlock: 0, toBlock: "latest" });
-    const account = state.account.toLowerCase();
-    const visible = state.role === ROLE.ARBITRATOR ? events : events.filter(event => Object.values(event.returnValues || {}).some(value => typeof value === "string" && value.toLowerCase() === account));
-    const recent = visible.slice(-20).reverse();
+    const events = await state.contract.getPastEvents("allEvents", { 
+      fromBlock: 0, 
+      toBlock: "latest" 
+    });
+    
+    const acceptedAgreementIds = new Set(
+      state.agreements
+        .filter(agreement => RECENT_AGREEMENT_STATUSES.includes(agreement.status))
+        .map(agreement => String(agreement.id))
+    );
+    const visible = state.role === ROLE.ARBITRATOR
+      ? events
+      : events.filter(event => {
+          const agreementId = event.returnValues?.agreementId;
+          return agreementId !== undefined && acceptedAgreementIds.has(String(agreementId));
+        });
+    
+    const recent = visible.slice(-50).reverse();
     const blockNumbers = [...new Set(recent.map(event => event.blockNumber))];
     const blocks = await Promise.all(blockNumbers.map(number => state.web3.eth.getBlock(number)));
     const timestamps = Object.fromEntries(blocks.map(block => [block.number, Number(block.timestamp)]));
-    state.activity = recent.map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 })).sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber || b.logIndex - a.logIndex);
-  } catch (_) { state.activity = []; }
+    
+    state.activity = recent
+      .map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 }))
+      .sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber);
+    
+    renderActivity();
+  } catch (_) { 
+    state.activity = []; 
+  }
 }
 
 async function agreementIdsForCurrentUser() {
@@ -582,72 +714,138 @@ function completedMilestones(agreement) {
 }
 
 function needsAttention(agreement) {
-  if (agreement.status === 5) return true;
-  if (state.role === ROLE.CARRIER && agreement.status === 0) return true;
-  if (state.role === ROLE.SHIPPER && agreement.status === 6) return true;
-  if (state.role === ROLE.SHIPPER && agreement.milestones.some(milestone => milestone.reported && !milestone.completed)) return true;
-  if (state.role === ROLE.CARRIER && ACTIVE_STATUSES.includes(agreement.status) && agreement.milestones.some(milestone => !milestone.reported)) return true;
-  return ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
+
+  if (agreement.status === 7) return true;
+  if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) return true;
+  
+  if (state.role === ROLE.SHIPPER) {
+    if (agreement.status === 0) return true;
+    
+    if (agreement.status === 1) return true;
+
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => m.reported && !m.completed)) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+
+  if (state.role === ROLE.CARRIER) {
+
+    if (agreement.status === 0) return true;
+
+    if (agreement.status === 1) return true;
+    
+    if ([3, 4].includes(agreement.status) && 
+        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
+  }
+  
+  return false;
 }
 
 function renderDashboard() {
-  const open = state.agreements.filter(agreement => OPEN_STATUSES.includes(agreement.status));
-  const active = state.agreements.filter(agreement => ACTIVE_STATUSES.includes(agreement.status));
-  const completed = state.agreements.filter(agreement => agreement.status === 3);
-  const activeDisputes = state.agreements.filter(agreement => agreement.status === 5);
-  const resolvedDisputes = state.agreements.filter(agreement => agreement.disputeReason > 0 && agreement.status !== 5);
+  const created = state.agreements.filter(a => a.status === 0).length;
+  const accepted = state.agreements.filter(a => a.status === 1).length;
+  const rejected = state.agreements.filter(a => a.status === 2).length;
+  const funded = state.agreements.filter(a => a.status === 3).length;
+  const inProgress = state.agreements.filter(a => a.status === 4).length;
+  const completed = state.agreements.filter(a => a.status === 5).length;
+  const refunded = state.agreements.filter(a => a.status === 6).length;
+  const disputed = state.agreements.filter(a => a.status === 7).length;
+
+  const active = funded + inProgress;
+  const open = created + accepted + funded + inProgress;
+  const total = state.agreements.length;
+  const activeDisputes = state.agreements.filter(a => a.status === 7).length;
+  const resolvedDisputes = state.agreements.filter(a => a.disputeReason > 0 && a.status !== 7).length;
+  
   const totalEscrow = state.agreements.reduce((sum, agreement) => {
     if (state.demo) return sum + escrowRemaining(agreement);
     return sum + BigInt(escrowRemaining(agreement));
   }, state.demo ? 0 : 0n);
-  if (state.role === ROLE.ARBITRATOR) {
-    $("#walletBalance").textContent = open.length;
-    $("#escrowBalance").textContent = activeDisputes.length;
-    $("#activeCount").textContent = completed.length;
-    $("#completedCount").textContent = resolvedDisputes.length;
-    $("#agreementNavCount").textContent = activeDisputes.length + resolvedDisputes.length;
-  } else {
+  
+  if (state.role !== ROLE.ARBITRATOR) {
     $("#escrowBalance").textContent = formatEth(totalEscrow);
-    $("#activeCount").textContent = active.length;
-    $("#completedCount").textContent = completed.length;
-    $("#agreementNavCount").textContent = state.agreements.length;
+    $("#activeCount").textContent = active;
+    $("#completedCount").textContent = completed;
+    $("#agreementNavCount").textContent = total;
+  }
+
+  if (state.role === ROLE.ARBITRATOR) {
+
+    $("#walletBalance").textContent = open;
+    $("#escrowBalance").textContent = activeDisputes;
+    $("#activeCount").textContent = completed;
+    $("#completedCount").textContent = resolvedDisputes;
+    $("#agreementNavCount").textContent = activeDisputes + resolvedDisputes;
   }
   renderRecentAgreements();
   renderAgreementGrid();
   renderCarriers();
   renderActivity();
+  renderNotifications();
   updateCountdowns();
-}
-
-function counterpart(agreement) {
-  if (state.role === ROLE.CARRIER) return { label: "Shipper", address: agreement.shipper };
-  return { label: "Carrier", address: agreement.carrier };
 }
 
 function renderRecentAgreements() {
   const container = $("#recentAgreementList");
-  const recent = (state.role === ROLE.ARBITRATOR ? state.agreements.filter(agreement => agreement.disputeReason > 0) : state.agreements).slice(0, 4);
+  const recent = (state.role === ROLE.ARBITRATOR
+    ? state.agreements.filter(agreement => agreement.disputeReason > 0)
+    : state.agreements.filter(agreement => RECENT_AGREEMENT_STATUSES.includes(agreement.status)))
+    .slice(0, 4);
   if (!recent.length) {
-    container.innerHTML = `<div class="empty-state"><strong>No agreements yet</strong>${state.role === ROLE.SHIPPER ? "Choose a carrier and create your first escrow." : "Agreements assigned to this wallet will appear here."}</div>`;
+    container.innerHTML = `<div class="empty-state"><strong>No accepted agreements yet</strong>${state.role === ROLE.SHIPPER ? "An agreement will appear here after its carrier accepts it." : state.role === ROLE.CARRIER ? "Accepted agreements will appear here. Check Notifications for new offers." : "Resolved and active disputes will appear here."}</div>`;
     return;
   }
   container.innerHTML = recent.map(agreement => {
-    const party = counterpart(agreement);
     return `<article class="agreement-row" data-agreement-id="${agreement.id}" tabindex="0">
       <span class="agreement-row-icon">#${agreement.id}</span>
-      <div class="agreement-row-main"><strong>Agreement #${agreement.id}</strong><small>${party.label}: ${shortAddress(party.address, 8, 5)}</small></div>
-      <div class="agreement-row-meta"><strong>${formatEth(agreement.totalValue)}</strong><small class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</small></div>
+      <div class="agreement-row-main"><strong>Agreement #${agreement.id}</strong><small>Shipper wallet: ${shortAddress(agreement.shipper, 8, 5)}</small><small>Carrier wallet: ${shortAddress(agreement.carrier, 8, 5)}</small></div>
+      <div class="agreement-row-meta"><strong>${formatEth(agreement.totalValue)}</strong><small>${formatMyrFromWei(agreement.totalValue)}</small><small class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</small></div>
       ${statusPill(agreement.status)}
     </article>`;
   }).join("");
+}
+
+function notificationItems() {
+  const items = [];
+  state.agreements.forEach(agreement => {
+    if (state.role === ROLE.SHIPPER) {
+      if (agreement.status === 1) items.push({ agreement, level: "success", title: `Carrier accepted Agreement #${agreement.id}`, message: "The agreement is ready for you to fund." });
+      const reported = agreement.milestones.filter(milestone => milestone.reported && !milestone.completed).length;
+      if ([3, 4].includes(agreement.status) && reported) items.push({ agreement, level: "attention", title: `${reported} milestone${reported === 1 ? " is" : "s are"} ready to verify`, message: `Open Agreement #${agreement.id} to review the carrier's update.` });
+      if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) items.push({ agreement, level: "danger", title: `Agreement #${agreement.id} is past its deadline`, message: "Open it to check the remaining refund." });
+    }
+    if (state.role === ROLE.CARRIER) {
+      if (agreement.status === 0) items.push({ agreement, level: "attention", title: `New Agreement #${agreement.id} needs your response`, message: "Review the delivery details, then accept or reject it." });
+      if (agreement.status === 3) items.push({ agreement, level: "success", title: `Agreement #${agreement.id} has been funded`, message: "You can now report delivery milestones." });
+    }
+    if (state.role === ROLE.ARBITRATOR && agreement.status === 7) {
+      items.push({ agreement, level: "danger", title: `Agreement #${agreement.id} has an active dispute`, message: "Review the reason and evidence before making a decision." });
+    }
+  });
+  return items.sort((a, b) => a.agreement.deadline - b.agreement.deadline).slice(0, 8);
+}
+
+function renderNotifications() {
+  const container = $("#notificationList");
+  const count = $("#notificationCount");
+  if (!container || !count) return;
+  const items = notificationItems();
+  count.textContent = String(items.length);
+  count.classList.toggle("hidden", items.length === 0);
+  container.innerHTML = items.length
+    ? items.map(item => `<button class="notification-item ${item.level}" type="button" data-agreement-id="${item.agreement.id}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small></span><span aria-hidden="true">→</span></button>`).join("")
+    : `<div class="empty-state compact"><strong>You are up to date</strong>New offers, acceptances and milestone updates will appear here.</div>`;
 }
 
 function agreementMatchesFilter(agreement) {
   let matchesStatus = true;
   if (state.role === ROLE.ARBITRATOR) {
     matchesStatus = agreement.disputeReason > 0;
-    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 5;
-    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 5;
+    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
+    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
   } else {
     if (state.filter === "active") matchesStatus = OPEN_STATUSES.includes(agreement.status);
     if (state.filter === "attention") matchesStatus = needsAttention(agreement);
@@ -678,10 +876,10 @@ function renderAgreementGrid() {
     const complete = completedMilestones(agreement);
     const total = agreement.milestones.length;
     const progress = total ? Math.round(complete / total * 100) : 0;
-    const party = counterpart(agreement);
     return `<article class="agreement-card" data-agreement-id="${agreement.id}" tabindex="0">
-      <div class="agreement-card-top"><div><span class="section-label">${party.label}: ${shortAddress(party.address)}</span><h3>Agreement #${agreement.id}</h3><p>${agreement.details ? `${escapeHtml(LOCATIONS[agreement.details.origin])} → ${escapeHtml(LOCATIONS[agreement.details.destination])} · ${escapeHtml(ITEM_TYPES[agreement.details.itemType])}` : "Shipment details unavailable"}</p><p>Deadline ${formatDate(agreement.deadline)}</p></div>${statusPill(agreement.status)}</div>
-      <div class="agreement-finance"><div><span>Total</span><strong>${formatEth(agreement.totalValue)}</strong></div><div><span>Released</span><strong>${formatEth(agreement.releasedAmount)}</strong></div><div><span>In escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div></div>
+      <div class="agreement-card-top"><div><span class="section-label">Agreement #${agreement.id}</span><h3>${agreement.details ? `${escapeHtml(LOCATIONS[agreement.details.origin])} → ${escapeHtml(LOCATIONS[agreement.details.destination])}` : "Delivery agreement"}</h3><p>${agreement.details ? escapeHtml(ITEM_TYPES[agreement.details.itemType]) : "Shipment details unavailable"}</p><p>Deadline ${formatDate(agreement.deadline)}</p></div>${statusPill(agreement.status)}</div>
+      <div class="agreement-parties compact"><span><b>Shipper wallet</b>${shortAddress(agreement.shipper, 10, 6)}</span><span><b>Carrier wallet</b>${shortAddress(agreement.carrier, 10, 6)}</span></div>
+      <div class="agreement-finance"><div><span>Total</span><strong>${formatEth(agreement.totalValue)}</strong><small>${formatMyrFromWei(agreement.totalValue)}</small></div><div><span>Released</span><strong>${formatEth(agreement.releasedAmount)}</strong></div><div><span>In escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div></div>
       <div class="progress-track"><i style="width:${progress}%"></i></div>
       <div class="agreement-progress-labels"><span>${complete} of ${total} verified</span><span class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</span></div>
     </article>`;
@@ -689,19 +887,21 @@ function renderAgreementGrid() {
 }
 
 function renderCarriers() {
-  const quick = $("#carrierQuickList");
-  const picker = $("#carrierPicker");
-  const marketplace = $("#carrierMarketplace");
-  if (!quick || !picker || !marketplace) return;
-  if (!state.carriers.length) {
-    quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
-    picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
-    marketplace.innerHTML = picker.innerHTML;
-    return;
-  }
-  quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
-  picker.innerHTML = matchingCarriersForForm().map(carrier => carrierCard(carrier, true)).join("") || `<div class="empty-state"><strong>No route match</strong>Adjust the shipment origin or delivery speed.</div>`;
-  renderMarketplace();
+    const quick = $("#carrierQuickList");
+    const picker = $("#carrierPicker");
+    const marketplace = $("#carrierMarketplace");
+    
+    if (!quick || !picker || !marketplace) return;
+    
+    if (!state.carriers.length) {
+        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
+        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
+        marketplace.innerHTML = picker.innerHTML;
+        return;
+    }
+    quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
+    updateCarrierPicker();
+    renderMarketplace();
 }
 
 function reputationLabel(points) {
@@ -722,8 +922,142 @@ function carrierCard(carrier, selectOnly = false) {
 }
 
 function matchingCarriersForForm() {
-  const origin = Number($("#origin")?.value || 0); const speed = Number($("#deliverySpeed")?.value || 0); const bit = speed <= 3 ? 2 ** (speed - 1) : 0;
-  return state.carriers.filter(carrier => !carrier.profile?.isSet || ((!origin || carrier.profile.location === origin) && (!bit || (carrier.profile.deliveryTypes & bit))));
+    const origin = Number($("#origin")?.value || 0);
+    const speed = Number($("#deliverySpeed")?.value || 0);
+    const speedBit = speed <= 3 ? 2 ** (speed - 1) : 0;
+    
+    return state.carriers.filter(carrier => {
+       
+        if (!carrier.profile?.isSet) return false;
+        
+        if (origin && carrier.profile.location !== origin) return false;
+        
+        if (speedBit && !(carrier.profile.deliveryTypes & speedBit)) return false;
+        
+        return true;
+    });
+}
+
+function updateCarrierPicker(resetPage = false) {
+    const picker = $("#carrierPicker");
+    const origin = Number($("#origin")?.value || 0);
+    const speed = Number($("#deliverySpeed")?.value || 0);
+    const query = ($("#carrierPickerSearch")?.value || "").trim().toLowerCase();
+    const summary = $("#carrierPickerSummary");
+    const pagination = $("#carrierPickerPagination");
+    let matchingCarriers = matchingCarriersForForm()
+      .filter(carrier => !query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (resetPage) state.carrierPickerPage = 1;
+    
+    if (!origin) {
+        picker.innerHTML = `
+            <div class="empty-state">
+                <strong>Select an origin first</strong>
+                <p>Choose the shipment origin to see available carriers.</p>
+            </div>
+        `;
+        $("#selectedCarrier").value = "";
+        if (summary) summary.textContent = "Enter the shipment details first.";
+        pagination?.classList.add("hidden");
+        return;
+    }
+
+    if (matchingCarriers.length === 0) {
+        const speedLabel = speed ? DELIVERY_SPEEDS[speed] : "selected";
+        picker.innerHTML = `
+            <div class="empty-state">
+                <strong>No carriers match</strong>
+                <p>No carriers in ${LOCATIONS[origin]} offer ${speedLabel} delivery.</p>
+                <p style="font-size:12px;margin-top:8px;">Try changing the delivery speed or origin.</p>
+            </div>
+        `;
+        $("#selectedCarrier").value = "";
+        if (summary) summary.textContent = query ? "No carrier matches your search and delivery requirements." : "No carrier matches this route and delivery speed.";
+        pagination?.classList.add("hidden");
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(matchingCarriers.length / CARRIER_PAGE_SIZE));
+    state.carrierPickerPage = Math.min(Math.max(1, state.carrierPickerPage), totalPages);
+    const start = (state.carrierPickerPage - 1) * CARRIER_PAGE_SIZE;
+    const visibleCarriers = matchingCarriers.slice(start, start + CARRIER_PAGE_SIZE);
+    picker.innerHTML = visibleCarriers.map(carrier =>
+        carrierCard(carrier, true)
+    ).join("");
+    if (summary) summary.textContent = `${matchingCarriers.length} matching carrier${matchingCarriers.length === 1 ? "" : "s"} · showing ${start + 1}–${Math.min(start + CARRIER_PAGE_SIZE, matchingCarriers.length)}`;
+    if (pagination) {
+      pagination.classList.toggle("hidden", totalPages <= 1);
+      $("#carrierPickerPage").textContent = `Page ${state.carrierPickerPage} of ${totalPages}`;
+      $("#carrierPickerPrev").disabled = state.carrierPickerPage === 1;
+      $("#carrierPickerNext").disabled = state.carrierPickerPage === totalPages;
+    }
+    if (matchingCarriers.length === 1) {
+        selectCarrier(matchingCarriers[0].address);
+    }
+}
+
+function changeCarrierPickerPage(direction) {
+  state.carrierPickerPage += direction;
+  updateCarrierPicker(false);
+  $("#carrierPickerTools")?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function updateSpeedOptions() {
+    const speedSelect = $("#deliverySpeed");
+    
+    speedSelect.innerHTML = `
+        <option value="">Select speed...</option>
+        <option value="1">Standard</option>
+        <option value="2">Express</option>
+        <option value="3">Same day</option>
+    `;
+}
+
+function getAvailableSpeedsForCarrier(carrierAddress) {
+    const carrier = state.carriers.find(c => c.address.toLowerCase() === carrierAddress.toLowerCase());
+    if (!carrier || !carrier.profile?.isSet) return [];
+    
+    const mask = carrier.profile.deliveryTypes;
+    const speeds = [];
+    if (mask & 1) speeds.push({ value: 1, label: "Standard" });
+    if (mask & 2) speeds.push({ value: 2, label: "Express" });
+    if (mask & 4) speeds.push({ value: 3, label: "Same day" });
+    return speeds;
+}
+
+function updateDeliverySpeedOptions() {
+    const carrierAddress = $("#selectedCarrier").value;
+    const speedSelect = $("#deliverySpeed");
+    const availableSpeeds = getAvailableSpeedsForCarrier(carrierAddress);
+    
+    speedSelect.innerHTML = '<option value="">Select speed...</option>';
+    
+    if (availableSpeeds.length === 0) {
+        speedSelect.innerHTML = '<option value="">No speeds available</option>';
+        return;
+    }
+    
+    availableSpeeds.forEach(speed => {
+        const option = document.createElement('option');
+        option.value = speed.value;
+        option.textContent = speed.label;
+        speedSelect.appendChild(option);
+    });
+}
+
+function selectCarrier(address) {
+    if ($("#selectedCarrier").value === address) {
+        showSection("createSection");
+        return;
+    }
+    $("#selectedCarrier").value = address;
+    $$('[data-select-carrier]').forEach(node => {
+        node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase());
+    });  
+    showSection("createSection");
+    const carrier = state.carriers.find(item => item.address.toLowerCase() === address.toLowerCase());
+    showToast(`${carrier?.name || "Carrier"} has been selected for this agreement.`);
 }
 
 function renderMarketplace() {
@@ -732,17 +1066,52 @@ function renderMarketplace() {
   carriers.sort((a, b) => $("#carrierSort")?.value === "reputation" ? Number(b.reputation) - Number(a.reputation) : a.name.localeCompare(b.name));
   $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Try removing one of the marketplace filters.</div>`;
 }
-
 function renderActivity() {
-  const labels = { AgreementCreated: "Agreement created", AgreementAccepted: "Agreement accepted", AgreementRejected: "Agreement rejected", AgreementFunded: "Escrow funded", DeadlineExtended: "Deadline extended", MilestoneReported: "Milestone reported", MilestoneVerified: "Milestone verified", AgreementRefunded: "Agreement refunded", DisputeRaised: "Dispute raised", DisputeResolved: "Dispute resolved", EvidenceSubmitted: "Evidence submitted", CommissionCollected: "Commission collected", CommissionWithdrawn: "Commission withdrawn", ReputationRewardsUpdated: "Reward settings updated", CarrierProfileUpdated: "Carrier profile updated", DisplayNameUpdated: "Display name updated" };
-  $("#activityFeed").innerHTML = state.activity.length ? state.activity.map(event => `<article class="activity-item"><span>${escapeHtml(labels[event.event] || event.event)}</span><small>${event.timestamp ? formatDate(event.timestamp) + " · " : ""}Block ${event.blockNumber} · ${shortAddress(event.transactionHash, 10, 6)}</small></article>`).join("") : `<div class="empty-state"><strong>No recent activity</strong>New on-chain activity will appear here.</div>`;
-}
+  const labels = { 
+    AgreementCreated: "Agreement created", 
+    AgreementAccepted: "Agreement accepted", 
+    AgreementRejected: "Agreement rejected", 
+    AgreementFunded: "Escrow funded", 
+    DeadlineExtended: "Deadline extended", 
+    MilestoneReported: "Milestone reported", 
+    MilestoneVerified: "Milestone verified", 
+    AgreementRefunded: "Shipper refunded", 
+    DisputeRaised: "Dispute raised", 
+    DisputeResolved: "Dispute resolved", 
+    EvidenceSubmitted: "Evidence submitted", 
+    CommissionCollected: "Commission collected", 
+    CommissionWithdrawn: "Commission withdrawn", 
+    ReputationRewardsUpdated: "Reputation rewards updated", 
+    CarrierProfileUpdated: "Carrier profile updated", 
+    DisplayNameUpdated: "Display name updated" 
+  };
+  
+  if (!state.activity.length) {
+    $("#activityFeed").innerHTML = `<div class="empty-state"><strong>No accepted-agreement activity yet</strong>Updates will appear after a carrier accepts an agreement.</div>`;
+    return;
+  }
+  
+  $("#activityFeed").innerHTML = state.activity.map(event => {
+    const label = labels[event.event] || event.event;
+    let extraInfo = '';
 
-function selectCarrier(address) {
-  $("#selectedCarrier").value = address;
-  $$('[data-select-carrier]').forEach(node => node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase()));
-  showSection("createSection");
-  showToast(`Selected ${shortAddress(address, 8, 6)}.`);
+    if (event.returnValues?.agreementId !== undefined) {
+      extraInfo = ` · Agreement #${event.returnValues.agreementId}`;
+    }
+
+    if (event.returnValues?.amount !== undefined) {
+      extraInfo += ` · ${formatEth(event.returnValues.amount)}`;
+    }
+
+    let who = '';
+    if (event.returnValues?.shipper) who = `Shipper: ${shortAddress(event.returnValues.shipper, 6, 4)}`;
+    else if (event.returnValues?.carrier) who = `Carrier: ${shortAddress(event.returnValues.carrier, 6, 4)}`;
+    
+    return `<article class="activity-item">
+      <span>${escapeHtml(label)}${extraInfo}</span>
+      <small>${event.timestamp ? formatDate(event.timestamp) : 'Just now'}${who ? ' · ' + who : ''}</small>
+    </article>`;
+  }).join("");
 }
 
 function showSection(sectionId) {
@@ -780,43 +1149,101 @@ function suggestedPrice() {
 
 function updatePriceSuggestion(fillIfEmpty = false) {
   const estimate = suggestedPrice().toFixed(6);
-  $("#priceSuggestion").textContent = `Suggested ${estimate} ETH — editable; this estimate is calculated in the browser and is not a fixed on-chain price.`;
+  $("#priceSuggestion").textContent = `Suggested ${estimate} ETH. You may change this amount before creating the agreement.`;
   if (fillIfEmpty && !$("#totalValue").value) $("#totalValue").value = estimate;
+  updateMyrEstimate();
 }
 
 async function createAgreement(event) {
-  event.preventDefault();
-  if (state.demo) return showToast("Creation is disabled in preview mode.", "error");
-  const carrier = $("#selectedCarrier").value;
-  const ethValue = $("#totalValue").value;
-  const deadline = Math.floor(new Date($("#deadline").value).getTime() / 1000);
-  const rows = $$(".milestone-form-row");
-  const types = rows.map(row => Number($(".milestone-type", row).value));
-  const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
-  const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
-  const details = [Number($("#origin").value), Number($("#destination").value), Number($("#itemType").value), Number($("#parcelSize").value), String(Math.round(Number($("#weight").value) * 1000)), Number($("#deliverySpeed").value), Number($("#guaranteeTier").value), ""];
-  if (!carrier) return showToast("Select a registered carrier.", "error");
-  if (!ethValue || Number(ethValue) <= 0) return showToast("Enter a total value above zero.", "error");
-  if (deadline <= Date.now() / 1000) return showToast("The deadline must be in the future.", "error");
-  if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) return showToast("Milestone payouts must be positive whole numbers totaling exactly 100%.", "error");
-  if (types.some((type, index) => type === 6 && !descriptions[index])) return showToast("Describe every milestone marked Other.", "error");
-  if (new Set(types).size !== types.length) return showToast("Each milestone checkpoint type can only be used once.", "error");
-  if (details[0] === details[1]) return showToast("Origin and destination must be different.", "error");
-  if (Number(details[4]) <= 0) return showToast("Weight must be greater than zero.", "error");
-  const totalValue = state.web3.utils.toWei(ethValue, "ether");
-  try {
-    const receipt = await sendTransaction(state.contract.methods.createAgreement(carrier, totalValue, deadline, types, descriptions, percentages, details), {}, "Create agreement");
-    if (!receipt) return;
-    event.target.reset();
-    clearParcelPhotos();
-    $("#selectedCarrier").value = "";
-    $("#milestoneRows").innerHTML = "";
-    addMilestoneRow(1, 30);
-    addMilestoneRow(5, 70);
-    setDefaultDeadline();
-    updatePriceSuggestion(true);
-    showSection("agreementsSection");
-  } catch (_) { /* sendTransaction already reports the reason */ }
+    event.preventDefault();
+    if (state.demo) return showToast("Agreement creation is unavailable in preview mode. Connect to Ganache to create one.", "error");
+
+    const carrier = $("#selectedCarrier").value;
+    const ethValue = $("#totalValue").value;
+    const deadline = Math.floor(new Date($("#deadline").value).getTime() / 1000);
+    const rows = $$(".milestone-form-row");
+    const types = rows.map(row => Number($(".milestone-type", row).value));
+    const descriptions = rows.map(row => Number($(".milestone-type", row).value) === 6 ? $(".milestone-description", row).value.trim() : "");
+    const percentages = rows.map(row => Number($(".milestone-percentage", row).value));
+    const selectedSpeed = Number($("#deliverySpeed").value);
+    const origin = Number($("#origin").value);
+    const destination = Number($("#destination").value);
+
+    if (!origin) return showValidationError("Choose the parcel pickup location.", "#origin");
+    if (!destination) return showValidationError("Choose the parcel delivery location.", "#destination");
+    if (origin === destination) return showValidationError("Pickup and delivery locations must be different.", "#destination");
+    if (Number($("#weight").value) <= 0) return showValidationError("Enter a parcel weight greater than 0 kg.", "#weight");
+    if (!selectedSpeed) return showValidationError("Choose a delivery speed.", "#deliverySpeed");
+    if (!carrier) return showValidationError("Choose a carrier that matches this pickup location and delivery speed.", "#carrierPickerSearch");
+
+    const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
+    if (carrierData && carrierData.profile?.isSet) {
+        const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
+        if (!(carrierData.profile.deliveryTypes & speedBit)) {
+            return showValidationError("The selected carrier does not offer this delivery speed. Choose another carrier.", "#carrierPickerSearch");
+        }
+    }
+    
+    if (!ethValue || Number(ethValue) <= 0) return showValidationError("Enter the agreement value in ETH. It must be greater than zero.", "#totalValue");
+    if (!deadline || deadline <= Date.now() / 1000) return showValidationError("Choose a delivery deadline later than the current date and time.", "#deadline");
+    
+    if (!rows.length || percentages.some(value => !Number.isInteger(value) || value <= 0) || percentages.reduce((a, b) => a + b, 0) !== 100) {
+        return showValidationError("Check the milestone payouts. Use positive whole numbers that add up to exactly 100%.", ".milestone-percentage");
+    }
+    
+    if (types.some((type, index) => type === 6 && !descriptions[index])) {
+        return showValidationError("Add a short description for each milestone marked Other.", ".milestone-description");
+    }
+    
+    if (new Set(types).size !== types.length) {
+        return showValidationError("The same milestone cannot be added twice. Choose a different checkpoint for each row.", ".milestone-type");
+    }
+
+    const details = [
+        Number($("#origin").value),
+        Number($("#destination").value),
+        Number($("#itemType").value),
+        Number($("#parcelSize").value),
+        String(Math.round(Number($("#weight").value) * 1000)),
+        Number($("#deliverySpeed").value),
+        Number($("#guaranteeTier").value),
+        ""
+    ];
+    
+    const totalValue = state.web3.utils.toWei(ethValue, "ether");
+
+    try {
+        const receipt = await sendTransaction(
+            state.contract.methods.createAgreement(
+                carrier,
+                totalValue,
+                deadline,
+                types,
+                descriptions,
+                percentages,
+                details
+            ),
+            {},
+            "Create agreement"
+        );
+        
+        if (!receipt) return;
+ 
+        event.target.reset();
+        $("#selectedCarrier").value = "";
+        $("#milestoneRows").innerHTML = "";
+        addMilestoneRow(1, 30);
+        addMilestoneRow(5, 70);
+        setDefaultDeadline();
+        updatePriceSuggestion(true);
+      
+        updateCarrierPicker();
+        
+        showSection("agreementsSection");
+        
+    } catch (_) {
+        // Error already handled by sendTransaction
+    }
 }
 
 async function openAgreement(id, showModal = true) {
@@ -832,106 +1259,6 @@ function milestoneName(milestone) {
   return milestone.type === 6 ? (milestone.description || "Other milestone") : MILESTONE_TYPES[milestone.type] || `Milestone ${milestone.index + 1}`;
 }
 
-function cidLink(cid) {
-  if (!cid) return "";
-  const url = imageUrl(cid);
-  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View proof ↗</a>` : `<span>${escapeHtml(cid)}</span>`;
-}
-
-function imageUrl(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const ipfsPath = raw.replace(/^ipfs:\/\//i, "").replace(/^\/ipfs\//i, "");
-  if (/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(ipfsPath)) return `https://ipfs.io/ipfs/${ipfsPath.split("/").map(encodeURIComponent).join("/")}`;
-  return "";
-}
-
-function imageProof(cid, alt, caption = "Open original") {
-  const url = imageUrl(cid);
-  if (!url) return "";
-  return `<figure class="proof-image"><a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy" data-proof-image></a><figcaption>${escapeHtml(caption)} ↗</figcaption></figure>`;
-}
-
-function imageInputMarkup(name, label, description) {
-  return `<div class="image-input-card" data-image-input><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(description)}</small></div><label class="file-button">Choose photo<input name="${escapeHtml(name)}" type="file" accept="image/*" data-image-file></label><figure class="image-preview hidden" data-image-preview-wrap><img alt="${escapeHtml(label)} preview" data-image-preview><figcaption data-image-caption>Photo preview</figcaption></figure></div>`;
-}
-
-function updateImagePreview(input) {
-  const card = input.closest("[data-image-input]");
-  if (!card) return;
-  const preview = $("[data-image-preview]", card); const wrap = $("[data-image-preview-wrap]", card); const caption = $("[data-image-caption]", card);
-  delete preview.dataset.fallback;
-  if (input.matches("[data-image-file]")) {
-    const file = input.files?.[0];
-    if (!file) return;
-    preview.src = URL.createObjectURL(file); wrap.classList.remove("hidden");
-    caption.textContent = `${file.name} — selected for this form.`;
-    return;
-  }
-}
-
-function parcelPhotoKey(file) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
-}
-
-function syncParcelPhotoInput() {
-  const input = $("#parcelPhotoFile");
-  if (!input || typeof DataTransfer === "undefined") return;
-  const transfer = new DataTransfer();
-  state.parcelPhotos.forEach(item => transfer.items.add(item.file));
-  input.files = transfer.files;
-}
-
-function renderParcelPhotoPreviews() {
-  const grid = $("#parcelPhotoGrid");
-  const count = state.parcelPhotos.length;
-  $("#parcelPhotoCount").textContent = count ? `${count} photo${count === 1 ? "" : "s"} selected` : "No photos selected";
-  grid.classList.toggle("hidden", count === 0);
-  grid.innerHTML = state.parcelPhotos.map((item, index) => `<figure class="selected-photo">
-    <button class="photo-remove" type="button" data-parcel-photo-remove="${index}" aria-label="Remove ${escapeHtml(item.file.name)}">×</button>
-    <button class="photo-open" type="button" data-parcel-photo-open="${index}" aria-label="Enlarge ${escapeHtml(item.file.name)}"><img src="${escapeHtml(item.url)}" alt="Selected parcel photo ${index + 1}"></button>
-    <figcaption title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</figcaption>
-  </figure>`).join("");
-}
-
-function addParcelPhotos(input) {
-  const existing = new Set(state.parcelPhotos.map(item => item.key));
-  [...(input.files || [])].forEach(file => {
-    if (!file.type.startsWith("image/")) return;
-    const key = parcelPhotoKey(file);
-    if (!existing.has(key)) {
-      state.parcelPhotos.push({ file, key, url: URL.createObjectURL(file) });
-      existing.add(key);
-    }
-  });
-  syncParcelPhotoInput();
-  renderParcelPhotoPreviews();
-}
-
-function removeParcelPhoto(index) {
-  const [removed] = state.parcelPhotos.splice(index, 1);
-  if (removed) URL.revokeObjectURL(removed.url);
-  syncParcelPhotoInput();
-  renderParcelPhotoPreviews();
-}
-
-function clearParcelPhotos() {
-  state.parcelPhotos.forEach(item => URL.revokeObjectURL(item.url));
-  state.parcelPhotos = [];
-  const input = $("#parcelPhotoFile");
-  if (input) input.value = "";
-  renderParcelPhotoPreviews();
-}
-
-function openParcelPhoto(index) {
-  const item = state.parcelPhotos[index];
-  if (!item) return;
-  $("#photoLightboxImage").src = item.url;
-  $("#photoLightboxCaption").textContent = item.file.name;
-  $("#photoLightbox").showModal();
-}
-
 function milestoneButtons(agreement, milestone) {
   if (!ACTIVE_STATUSES.includes(agreement.status)) return "";
   if (state.role === ROLE.CARRIER && !milestone.reported && agreement.deadline >= Date.now() / 1000) return `<button class="button button-secondary" type="button" data-action="report" data-milestone="${milestone.index}">Report milestone</button>`;
@@ -939,58 +1266,191 @@ function milestoneButtons(agreement, milestone) {
   return "";
 }
 
-function timelineEvents(agreement) {
-  const events = [];
-  agreement.milestones.forEach(milestone => {
-    if (milestone.reportedTimestamp) events.push({ timestamp: milestone.reportedTimestamp, title: `${milestoneName(milestone)} reported`, note: milestone.proofCID ? `Proof CID: ${milestone.proofCID}` : "No proof CID attached" });
-    if (milestone.completedTimestamp) events.push({ timestamp: milestone.completedTimestamp, title: `${milestoneName(milestone)} verified`, note: `${milestone.percentage}% payout released` });
-  });
-  return events.sort((a, b) => b.timestamp - a.timestamp);
-}
-
 function renderAgreementDetail(agreement) {
   const complete = completedMilestones(agreement);
-  const events = timelineEvents(agreement);
-  const canDispute = [ROLE.SHIPPER, ROLE.CARRIER].includes(state.role) && ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline >= Date.now() / 1000;
-  const canRefund = ACTIVE_STATUSES.includes(agreement.status) && agreement.deadline < Date.now() / 1000;
-  const isParticipant = [agreement.shipper, agreement.carrier].some(address => address.toLowerCase() === state.account.toLowerCase());
-  const disputeReason = agreement.disputeReason > 0 ? (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : "";
+  
+  const canDispute = [ROLE.SHIPPER, ROLE.CARRIER].includes(state.role) && 
+                     [3, 4].includes(agreement.status) && 
+                     agreement.deadline >= Date.now() / 1000;
+  
+  const canRefund = [3, 4].includes(agreement.status) && 
+                    agreement.deadline < Date.now() / 1000;
+  
+  const isParticipant = [agreement.shipper, agreement.carrier].some(address => 
+    address.toLowerCase() === state.account.toLowerCase()
+  );
+  
+  const disputeReason = agreement.disputeReason > 0 ? 
+    (agreement.disputeReason === 5 ? agreement.disputeOtherReason : DISPUTE_REASONS[agreement.disputeReason]) : 
+    "";
+  
   const details = agreement.details;
+  
   $("#agreementDetail").innerHTML = `
-    <div class="detail-head"><span class="section-label">On-chain agreement</span><div class="detail-title-row"><div><h2>Agreement #${agreement.id}</h2><p>${shortAddress(agreement.shipper, 9, 6)} → ${shortAddress(agreement.carrier, 9, 6)}</p></div>${statusPill(agreement.status)}</div></div>
+    <div class="detail-head">
+      <span class="section-label">On-chain agreement</span>
+      <div class="detail-title-row">
+        <div>
+          <h2>Agreement #${agreement.id}</h2>
+          <p>Review the people, payment and delivery progress for this agreement.</p>
+        </div>
+        ${statusPill(agreement.status)}
+      </div>
+    </div>
+    
     <div class="detail-body">
+      <div class="agreement-parties">
+        <div><span>Shipper MetaMask wallet</span><strong>${escapeHtml(agreement.shipper)}</strong><button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.shipper)}">Copy shipper address</button></div>
+        <div><span>Carrier MetaMask wallet</span><strong>${escapeHtml(agreement.carrier)}</strong><button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.carrier)}">Copy carrier address</button></div>
+      </div>
       <div class="detail-stats">
-        <div class="detail-stat"><span>Total value</span><strong>${formatEth(agreement.totalValue)}</strong></div>
-        <div class="detail-stat"><span>Released</span><strong>${formatEth(agreement.releasedAmount)}</strong></div>
-        <div class="detail-stat"><span>Current escrow</span><strong>${formatEth(escrowRemaining(agreement))}</strong></div>
-        <div class="detail-stat"><span>Deadline</span><strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong></div>
+        <div class="detail-stat">
+          <span>Total value</span>
+          <strong>${formatEth(agreement.totalValue)}</strong>
+          <small>${formatMyrFromWei(agreement.totalValue)}</small>
+        </div>
+        <div class="detail-stat">
+          <span>Released</span>
+          <strong>${formatEth(agreement.releasedAmount)}</strong>
+        </div>
+        <div class="detail-stat">
+          <span>Current escrow</span>
+          <strong>${formatEth(escrowRemaining(agreement))}</strong>
+        </div>
+        <div class="detail-stat">
+          <span>Deadline</span>
+          <strong class="countdown" data-deadline="${agreement.deadline}">${deadlineText(agreement.deadline)}</strong>
+        </div>
       </div>
-      ${details ? `<div class="shipment-details"><div><span>Route</span><strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong></div><div><span>Parcel</span><strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong></div><div><span>Service</span><strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong></div><div><span>Weight</span><strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong></div></div>${details.photoCID ? `<div class="proof-gallery"><div><span class="section-label">Parcel photo</span>${imageProof(details.photoCID, `Parcel for agreement ${agreement.id}`, "View parcel photo")}</div></div>` : ""}` : ""}
-      ${agreement.disputeReason > 0 ? `<div class="evidence-card"><span class="section-label">${agreement.status === 5 ? "Active dispute" : "Resolved dispute"}</span><p>${escapeHtml(disputeReason || "Reason unavailable")}</p></div>` : ""}
-      <div class="detail-section-title"><h3>Milestone progress</h3><span>${complete} of ${agreement.milestones.length} verified</span></div>
-      <div class="milestone-stepper">${agreement.milestones.map(milestone => `
-        <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
-          <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
-          <div class="milestone-copy"><h4>${escapeHtml(milestoneName(milestone))}</h4><p>${milestone.completed ? `Verified ${formatDate(milestone.completedTimestamp)}` : milestone.reported ? `Reported ${formatDate(milestone.reportedTimestamp)}` : "Waiting for carrier report"}${milestone.proofCID ? `<br>${cidLink(milestone.proofCID)}` : ""}</p>${milestone.proofCID ? imageProof(milestone.proofCID, `${milestoneName(milestone)} delivery proof`, "View milestone photo") : ""}</div>
-          <span class="milestone-payout">${milestone.percentage}%</span>
-          <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
-        </div>`).join("")}</div>
-      <div class="detail-section-title"><h3>Chronological history</h3><span>Newest first</span></div>
-      <div class="timeline">${events.length ? events.map(event => `<div class="timeline-event"><strong>${escapeHtml(event.title)}</strong><span>${formatDate(event.timestamp)} · ${escapeHtml(event.note)}</span></div>`).join("") : `<div class="timeline-event"><strong>No milestone activity yet</strong><span>Reports and verifications will appear here.</span></div>`}</div>
-      ${agreement.disputeReason > 0 ? `<div class="detail-section-title"><h3>Submitted evidence</h3><span>${agreement.evidence?.length || 0} item(s)</span></div><div class="evidence-list">${agreement.evidence?.length ? agreement.evidence.map(item => `<article class="evidence-card"><strong>${shortAddress(item.submittedBy, 9, 6)}</strong><p>${escapeHtml(item.description)}</p><small>${formatDate(item.timestamp)} ${item.fileCID ? `· ${cidLink(item.fileCID)}` : ""}</small>${item.fileCID ? imageProof(item.fileCID, "Dispute evidence", "View evidence photo") : ""}</article>`).join("") : `<div class="empty-state"><strong>No evidence submitted</strong>No participant evidence was attached to this dispute.</div>`}</div>` : ""}
+      
+      ${details ? `
+        <div class="shipment-details">
+          <div>
+            <span>Route</span>
+            <strong>${escapeHtml(LOCATIONS[details.origin])} → ${escapeHtml(LOCATIONS[details.destination])}</strong>
+          </div>
+          <div>
+            <span>Parcel</span>
+            <strong>${escapeHtml(ITEM_TYPES[details.itemType])} · ${escapeHtml(PARCEL_SIZES[details.size])}</strong>
+          </div>
+          <div>
+            <span>Service</span>
+            <strong>${escapeHtml(DELIVERY_SPEEDS[details.deliverySpeed])} · ${escapeHtml(GUARANTEE_TIERS[details.guaranteeTier])}</strong>
+          </div>
+          <div>
+            <span>Weight</span>
+            <strong>${(Number(details.weight) / 1000).toLocaleString()} kg</strong>
+          </div>
+        </div>
+      ` : ""}
+      
+      ${agreement.disputeReason > 0 ? `
+        <div class="evidence-card">
+          <span class="section-label">${agreement.status === 7 ? "Active dispute" : "Resolved dispute"}</span>
+          <p>${escapeHtml(disputeReason || "Reason unavailable")}</p>
+        </div>
+      ` : ""}
+      
+      <div class="detail-section-title">
+        <h3>Delivery milestones and history</h3>
+        <span>${complete} of ${agreement.milestones.length} completed</span>
+      </div>
+      
+      <div class="milestone-stepper">
+        ${agreement.milestones.map(milestone => `
+          <div class="milestone-item ${milestone.completed ? "complete" : milestone.reported ? "reported" : ""}">
+            <span class="milestone-dot">${milestone.completed ? "✓" : milestone.index + 1}</span>
+            <div class="milestone-copy">
+              <h4>${escapeHtml(milestoneName(milestone))}</h4>
+              <div class="milestone-history">
+                ${milestone.reportedTimestamp ? `<span><b>Carrier reported progress</b>${formatDate(milestone.reportedTimestamp)}</span>` : `<span class="pending"><b>Waiting for carrier update</b>The carrier has not reported this milestone yet.</span>`}
+                ${milestone.completedTimestamp ? `<span><b>Shipper verified milestone</b>${formatDate(milestone.completedTimestamp)} · ${milestone.percentage}% of the agreement value released</span>` : milestone.reported ? `<span class="pending"><b>Waiting for shipper verification</b>The shipper needs to review this milestone before payment is released.</span>` : ""}
+              </div>
+            </div>
+            <span class="milestone-payout">${milestone.percentage}%</span>
+            <div class="milestone-actions">${milestoneButtons(agreement, milestone)}</div>
+          </div>
+        `).join("")}
+      </div>
+      
+      ${agreement.disputeReason > 0 ? `
+        <div class="detail-section-title">
+          <h3>Submitted evidence</h3>
+          <span>${agreement.evidence?.length || 0} item(s)</span>
+        </div>
+        <div class="evidence-list">
+          ${agreement.evidence?.length ? 
+            agreement.evidence.map(item => `
+              <article class="evidence-card">
+                <strong>${shortAddress(item.submittedBy, 9, 6)}</strong>
+                <p>${escapeHtml(item.description)}</p>
+                <small>${formatDate(item.timestamp)}</small>
+              </article>
+            `).join("") : 
+            `<div class="empty-state">
+              <strong>No evidence submitted</strong>
+              <p>No participant evidence was attached to this dispute.</p>
+            </div>`
+          }
+        </div>
+      ` : ""}
+      
       <div class="detail-actions">
-        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `<button class="button button-primary" type="button" data-action="accept">Accept agreement</button><button class="button button-danger" type="button" data-action="reject">Reject agreement</button>` : ""}
-        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `<span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>` : ""}
-        ${agreement.status === 6 && state.role === ROLE.SHIPPER ? `<button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>` : ""}
-        ${agreement.status === 6 && state.role === ROLE.CARRIER ? `<span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>` : ""}
-        ${agreement.status === 7 ? `<span class="action-note">This agreement was rejected and cannot be funded.</span>` : ""}
-        ${state.role === ROLE.SHIPPER && ![3, 4, 5, 7].includes(agreement.status) ? `<button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>` : ""}
-        ${canDispute ? `<button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>` : ""}
-        ${canRefund ? `<button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>` : ""}
-        ${agreement.status === 5 && isParticipant ? `<button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>` : ""}
-        ${agreement.status === 5 && state.role === ROLE.ARBITRATOR ? `<button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button><button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>` : ""}
+        <!-- Created (0): Carrier can Accept/Reject -->
+        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `
+          <button class="button button-primary" type="button" data-action="accept">Accept agreement</button>
+          <button class="button button-danger" type="button" data-action="reject">Reject agreement</button>
+        ` : ""}
+        
+        <!-- Created (0): Shipper waits -->
+        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `
+          <span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>
+        ` : ""}
+        
+        <!-- Accepted (1): Shipper can FUND -->
+        ${agreement.status === 1 && state.role === ROLE.SHIPPER ? `
+          <button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>
+        ` : ""}
+        
+        <!-- Accepted (1): Carrier waits -->
+        ${agreement.status === 1 && state.role === ROLE.CARRIER ? `
+          <span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>
+        ` : ""}
+        
+        <!-- Rejected (2) -->
+        ${agreement.status === 2 ? `
+          <span class="action-note">This agreement was rejected and cannot be funded.</span>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Extend deadline -->
+        ${state.role === ROLE.SHIPPER && ![2,5,6,7].includes(agreement.status) ? `
+          <button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Participants can Dispute -->
+        ${canDispute ? `
+          <button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>
+        ` : ""}
+        
+        <!-- Funded/InProgress (3,4): Shipper can Refund if deadline passed -->
+        ${canRefund ? `
+          <button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Participants can Submit Evidence -->
+        ${agreement.status === 7 && isParticipant ? `
+          <button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>
+        ` : ""}
+        
+        <!-- Disputed (7): Arbitrator can Resolve -->
+        ${agreement.status === 7 && state.role === ROLE.ARBITRATOR ? `
+          <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
+          <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
+        ` : ""}
       </div>
-    </div>`;
+    </div>
+  `;
+  
   updateCountdowns();
 }
 
@@ -1004,9 +1464,9 @@ function openActionDialog(action, milestoneIndex = null) {
   submit.textContent = "Confirm";
   if (action === "report") {
     title.textContent = "Report milestone";
-    description.textContent = "Record delivery progress and optionally choose a proof photo for preview.";
-    fields.innerHTML = imageInputMarkup("proofCID", "Milestone delivery photo (optional)", "Photograph the parcel, checkpoint, receiver, or delivery document.");
-    submit.textContent = "Report on-chain";
+    description.textContent = "Confirm that you have reached this delivery milestone. The shipper will be asked to verify it before payment is released.";
+    fields.innerHTML = `<div class="plain-reminder"><strong>Before you continue</strong><span>Check that you selected the correct agreement and milestone. This update will be saved to the blockchain.</span></div>`;
+    submit.textContent = "Report milestone";
   } else if (action === "extend") {
     const agreement = state.agreements.find(item => item.id === state.currentAgreementId);
     const minimum = new Date(Math.max(Date.now() + 60000, (agreement?.deadline + 60) * 1000));
@@ -1017,13 +1477,13 @@ function openActionDialog(action, milestoneIndex = null) {
     submit.textContent = "Extend deadline";
   } else if (action === "dispute") {
     title.textContent = "Raise a dispute";
-    description.textContent = "Raising a dispute freezes payouts. Optional evidence is submitted in a second wallet transaction after the dispute opens.";
-    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Choose a supporting photo to preview before submitting.")}`;
+    description.textContent = "This will pause all remaining payments until the arbitrator makes a decision.";
+    fields.innerHTML = `<label>What is the problem?<select name="reason" required><option value="1">A milestone was not completed</option><option value="2">The delivery information is insufficient</option><option value="3">An expected payment is being withheld</option><option value="4">The parcel was damaged or lost</option><option value="5">Another reason</option></select></label><label class="other-reason hidden">Explain the other reason<textarea name="otherReason" placeholder="Describe what happened in simple terms"></textarea></label><label>Additional details (optional)<textarea name="evidenceDescription" placeholder="Add information that may help the arbitrator understand the problem"></textarea></label>`;
   } else if (action === "evidence") {
-    title.textContent = "Submit dispute evidence";
-    description.textContent = "Evidence is permanently associated with this disputed agreement.";
-    fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label>${imageInputMarkup("fileCID", "Evidence photo or document (optional)", "Choose a supporting photo to preview before submitting.")}`;
-    submit.textContent = "Submit evidence";
+    title.textContent = "Add dispute information";
+    description.textContent = "Your written information will remain attached to this agreement for the arbitrator to review.";
+    fields.innerHTML = `<label>What should the arbitrator know?<textarea name="description" required placeholder="Describe what happened and why it supports your case"></textarea></label>`;
+    submit.textContent = "Add information";
   }
   $("#actionDialog").showModal();
 }
@@ -1045,36 +1505,83 @@ async function handleDetailAction(action, milestoneIndex) {
 }
 
 async function submitAction(event) {
-  event.preventDefault();
-  const data = new FormData(event.target);
-  const { action, agreementId, milestoneIndex } = state.pendingAction || {};
-  if (state.demo) {
-    $("#actionDialog").close();
-    return showToast("Transactions are disabled in preview mode.", "error");
-  }
-  try {
-    if (action === "report") await sendTransaction(state.contract.methods.reportMilestone(agreementId, milestoneIndex, ""), {}, "Report milestone");
-    if (action === "extend") {
-      const agreement = state.agreements.find(item => item.id === Number(agreementId));
-      const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
-      if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) return showToast("Choose a deadline later than the current deadline.", "error");
-      await sendTransaction(state.contract.methods.extendDeadline(agreementId, newDeadline), {}, "Extend deadline");
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const { action, agreementId, milestoneIndex } = state.pendingAction || {};
+    
+    if (state.demo) {
+        $("#actionDialog").close();
+        return showToast("Transactions are disabled in preview mode.", "error");
     }
-    if (action === "dispute") {
-      const reason = Number(data.get("reason"));
-      const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
-      const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
-      if (reason === 5 && !otherReason) return showToast("Enter the other dispute reason.", "error");
-      await sendTransaction(state.contract.methods.raiseDispute(agreementId, reason, otherReason), {}, "Raise dispute");
-      if (evidenceDescription) await sendTransaction(state.contract.methods.submitEvidence(agreementId, evidenceDescription, ""), {}, "Submit dispute evidence");
+    
+    try {
+
+        if (action === "report") {
+            await sendTransaction(
+                state.contract.methods.reportMilestone(agreementId, milestoneIndex, ""),
+                {},
+                "Report milestone"
+            );
+        }
+
+        if (action === "extend") {
+            const agreement = state.agreements.find(item => item.id === Number(agreementId));
+            const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
+            if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) {
+                return showToast("Choose a deadline later than the current deadline.", "error");
+            }
+            await sendTransaction(
+                state.contract.methods.extendDeadline(agreementId, newDeadline),
+                {},
+                "Extend deadline"
+            );
+        }
+        
+        if (action === "dispute") {
+            const reason = Number(data.get("reason"));
+            const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
+            const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
+            
+            if (reason === 5 && !otherReason) {
+                return showToast("Enter the other dispute reason.", "error");
+            }
+            
+            await sendTransaction(
+                state.contract.methods.raiseDispute(agreementId, reason, otherReason),
+                {},
+                "Raise dispute"
+            );
+            
+            if (evidenceDescription) {
+                await sendTransaction(
+                    state.contract.methods.submitEvidence(
+                        agreementId,
+                        evidenceDescription,
+                        ""
+                    ),
+                    {},
+                    "Submit dispute evidence"
+                );
+            }
+        }
+
+        if (action === "evidence") {
+            const description = String(data.get("description") || "").trim();
+            if (!description) {
+                return showValidationError("Describe what happened before adding this information.", '[name="description"]');
+            }
+            await sendTransaction(
+                state.contract.methods.submitEvidence(agreementId, description, ""),
+                {},
+                "Submit evidence"
+            );
+        }
+        
+        $("#actionDialog").close();
+        
+    } catch (_) {
+        // Error already handled by sendTransaction
     }
-    if (action === "evidence") {
-      const description = String(data.get("description") || "").trim();
-      if (!description) return showToast("Evidence description is required.", "error");
-      await sendTransaction(state.contract.methods.submitEvidence(agreementId, description, ""), {}, "Submit evidence");
-    }
-    $("#actionDialog").close();
-  } catch (_) { /* already surfaced */ }
 }
 
 async function registerRole(role) {
@@ -1099,21 +1606,21 @@ function seedDemo() {
     { address: "0x6B86E1a3D577Fd859b7c554734dd45aE347A7C90", name: "GreenRoute Carrier", profile: { location: 7, deliveryTypes: 1, isSet: true }, reputation: "100" }
   ];
   state.agreements = [
-    { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 2, details: { origin: 12, destination: 14, itemType: 2, size: 2, weight: 3500, deliverySpeed: 2, guaranteeTier: 2, photoCID: "bafycargo1042" }, milestones: [
-      { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000, proofCID: "bafybeipickup1042" },
-      { index: 1, type: 3, description: "", percentage: 30, reported: true, completed: false, reportedTimestamp: now - 3600, completedTimestamp: 0, proofCID: "bafybeitransit1042" },
+    { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 4, details: { origin: 12, destination: 14, itemType: 2, size: 2, weight: 3500, deliverySpeed: 2, guaranteeTier: 2, photoCID: "" }, milestones: [
+      { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000, proofCID: "" },
+      { index: 1, type: 3, description: "", percentage: 30, reported: true, completed: false, reportedTimestamp: now - 3600, completedTimestamp: 0, proofCID: "" },
       { index: 2, type: 5, description: "", percentage: 40, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
     ]},
-    { id: 3, shipper: state.account, carrier: state.carriers[1].address, totalValue: 2.25, fundedAmount: 2.25, releasedAmount: 0, deadline: now + 36000, status: 5, details: { origin: 14, destination: 7, itemType: 5, size: 3, weight: 8200, deliverySpeed: 1, guaranteeTier: 3, photoCID: "" }, disputeReason: 2, disputeOtherReason: "", evidence: [
-      { submittedBy: state.account, description: "The attached image does not match the sealed cargo ID.", fileCID: "bafybaddocument", timestamp: now - 8200 }
+    { id: 3, shipper: state.account, carrier: state.carriers[1].address, totalValue: 2.25, fundedAmount: 2.25, releasedAmount: 0, deadline: now + 36000, status: 7, details: { origin: 14, destination: 7, itemType: 5, size: 3, weight: 8200, deliverySpeed: 1, guaranteeTier: 3, photoCID: "" }, disputeReason: 2, disputeOtherReason: "", evidence: [
+      { submittedBy: state.account, description: "The delivered cargo ID does not match the agreement.", fileCID: "", timestamp: now - 8200 }
     ], milestones: [
-      { index: 0, type: 1, description: "", percentage: 40, reported: true, completed: false, reportedTimestamp: now - 12000, completedTimestamp: 0, proofCID: "bafyproofshipment" },
+      { index: 0, type: 1, description: "", percentage: 40, reported: true, completed: false, reportedTimestamp: now - 12000, completedTimestamp: 0, proofCID: "" },
       { index: 1, type: 5, description: "", percentage: 60, reported: false, completed: false, reportedTimestamp: 0, completedTimestamp: 0, proofCID: "" }
     ]},
-    { id: 1, shipper: state.account, carrier: state.carriers[2].address, totalValue: 1.6, fundedAmount: 1.6, releasedAmount: 1.6, deadline: now - 604800, status: 3, details: { origin: 7, destination: 12, itemType: 1, size: 1, weight: 900, deliverySpeed: 1, guaranteeTier: 1, photoCID: "" }, milestones: [
+    { id: 1, shipper: state.account, carrier: state.carriers[2].address, totalValue: 1.6, fundedAmount: 1.6, releasedAmount: 1.6, deadline: now - 604800, status: 5, details: { origin: 7, destination: 12, itemType: 1, size: 1, weight: 900, deliverySpeed: 1, guaranteeTier: 1, photoCID: "" }, milestones: [
       { index: 0, type: 1, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 900000, completedTimestamp: now - 899000, proofCID: "" },
       { index: 1, type: 3, description: "", percentage: 25, reported: true, completed: true, reportedTimestamp: now - 800000, completedTimestamp: now - 799000, proofCID: "" },
-      { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000, proofCID: "bafyfinaldelivery" }
+      { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000, proofCID: "" }
     ]}
   ];
   state.activity = [{ event: "MilestoneReported", blockNumber: 48, transactionHash: "0x9156f73c8798d74b37aa001734c4795ddf22" }, { event: "AgreementFunded", blockNumber: 41, transactionHash: "0x20d62eaba4aa321a5998d938726c152d8b31" }];
@@ -1169,7 +1676,8 @@ async function saveRewardSettings(event) {
   event.preventDefault();
   const completion = Number($("#completionRewardInput").value);
   const dispute = Number($("#disputeRewardInput").value);
-  if (!Number.isSafeInteger(completion) || completion <= 0 || !Number.isSafeInteger(dispute) || dispute <= 0) return showToast("Reward values must be positive whole numbers.", "error");
+  if (!Number.isInteger(completion) || completion < REWARD_MIN || completion > REWARD_MAX) return showValidationError(`Completed-delivery reward must be a whole number from ${REWARD_MIN} to ${REWARD_MAX}.`, "#completionRewardInput");
+  if (!Number.isInteger(dispute) || dispute < REWARD_MIN || dispute > REWARD_MAX) return showValidationError(`Carrier dispute-win reward must be a whole number from ${REWARD_MIN} to ${REWARD_MAX}.`, "#disputeRewardInput");
   if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
   const updateCompletion = String(completion) !== String(state.completionReward);
   const updateDispute = String(dispute) !== String(state.disputeWinReward);
@@ -1184,7 +1692,10 @@ function bindEvents() {
   $("#connectButton").addEventListener("click", () => connectWallet(true));
   $$('[data-connect]').forEach(button => button.addEventListener("click", () => connectWallet(true)));
   $("#refreshButton").addEventListener("click", refreshAll);
-  $("#profileAddress").addEventListener("click", async () => { await navigator.clipboard.writeText(state.account); showToast("Wallet address copied."); });
+  $("#profileAddress").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(state.account);
+    showToast("Wallet address copied.");
+  });
   $("#addressForm").addEventListener("submit", async event => {
     event.preventDefault();
     const address = $("#contractAddress").value.trim();
@@ -1197,14 +1708,39 @@ function bindEvents() {
   $("#carrierProfileForm").addEventListener("submit", saveCarrierProfile);
   $("#withdrawCommissionButton").addEventListener("click", withdrawCommission);
   $("#rewardSettingsForm").addEventListener("submit", saveRewardSettings);
-  ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace));
+  $("#refreshRateButton").addEventListener("click", () => refreshEthMyrRate(true));
+  $("#totalValue").addEventListener("input", updateMyrEstimate);
+  $("#carrierPickerSearch").addEventListener("input", () => updateCarrierPicker(true));
+  $("#carrierPickerPrev").addEventListener("click", () => changeCarrierPickerPage(-1));
+  $("#carrierPickerNext").addEventListener("click", () => changeCarrierPickerPage(1));
+  ["carrierSearch", "carrierLocationFilter", "carrierSpeedFilter", "carrierSort"].forEach(id => {
+    $("#" + id).addEventListener(id === "carrierSearch" ? "input" : "change", renderMarketplace);
+  });
   $("#agreementMonth").addEventListener("change", event => setAgreementMonthFilter(event.target.value));
   $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
   $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
   ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
-    $("#" + id).addEventListener("input", () => { updatePriceSuggestion(false); renderCarriers(); });
-    $("#" + id).addEventListener("change", () => { updatePriceSuggestion(false); renderCarriers(); });
+    $("#" + id).addEventListener("input", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
+    $("#" + id).addEventListener("change", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
   });
+  $("#origin").addEventListener("change", function() {
+    $("#deliverySpeed").value = "";
+    $("#selectedCarrier").value = "";
+    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    updateCarrierPicker(true);
+  });
+  $("#deliverySpeed").addEventListener("change", function() {
+    $("#selectedCarrier").value = "";
+    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    updateCarrierPicker(true);
+  });
+
   $("#addMilestoneButton").addEventListener("click", () => addMilestoneRow());
   $("#milestoneRows").addEventListener("input", updatePercentageTotal);
   $("#milestoneRows").addEventListener("change", event => {
@@ -1223,16 +1759,12 @@ function bindEvents() {
     updatePercentageTotal();
   });
   document.addEventListener("click", event => {
-    const removePhoto = event.target.closest("[data-parcel-photo-remove]");
-    if (removePhoto) {
+    const copyAddress = event.target.closest("[data-copy-address]");
+    if (copyAddress) {
       event.preventDefault();
-      removeParcelPhoto(Number(removePhoto.dataset.parcelPhotoRemove));
-      return;
-    }
-    const openPhoto = event.target.closest("[data-parcel-photo-open]");
-    if (openPhoto) {
-      event.preventDefault();
-      openParcelPhoto(Number(openPhoto.dataset.parcelPhotoOpen));
+      navigator.clipboard.writeText(copyAddress.dataset.copyAddress)
+        .then(() => showToast("Wallet address copied."))
+        .catch(() => showToast("The address could not be copied. Select and copy it manually.", "error"));
       return;
     }
     const nav = event.target.closest("[data-section-target]");
@@ -1250,22 +1782,17 @@ function bindEvents() {
   });
   $$('[data-close-dialog]').forEach(button => button.addEventListener("click", () => $("#agreementDialog").close()));
   $$('[data-close-action-dialog]').forEach(button => button.addEventListener("click", () => $("#actionDialog").close()));
-  $$('[data-close-photo-lightbox]').forEach(button => button.addEventListener("click", () => $("#photoLightbox").close()));
   $("#actionForm").addEventListener("submit", submitAction);
   $("#actionFields").addEventListener("change", event => {
-    if (event.target.name === "reason") $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
-    if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
+    if (event.target.name === "reason") {
+      $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
+    }
   });
-  document.addEventListener("change", event => {
-    if (event.target.id === "parcelPhotoFile") addParcelPhotos(event.target);
-    else if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
+  [$("#agreementDialog"), $("#actionDialog")].forEach(dialog => {
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) dialog.close();
+    });
   });
-  document.addEventListener("error", event => {
-    if (!event.target.matches?.("[data-proof-image], [data-image-preview]") || event.target.dataset.fallback) return;
-    event.target.dataset.fallback = "1";
-    event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
-  }, true);
-  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); }));
 }
 
 async function init() {
@@ -1273,9 +1800,12 @@ async function init() {
   populateLocationSelects();
   setDefaultDeadline();
   updatePriceSuggestion(true);
+  loadCachedEthMyrRate();
+  refreshEthMyrRate(false);
   addMilestoneRow(1, 30);
   addMilestoneRow(5, 70);
   setInterval(updateCountdowns, 30000);
+  setInterval(() => refreshEthMyrRate(false), 300000);
   if (window.ethereum && !state.demo) {
     window.ethereum.on("accountsChanged", accounts => {
       state.account = accounts[0] || null;
