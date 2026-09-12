@@ -168,7 +168,7 @@ git push origin your-branch-name
 
 **Carrier Marketplace**
 - Searchable, sortable carrier marketplace
-- Agreement details are entered before carrier selection, so the picker first filters by delivery destination and then by delivery type
+- Agreement details are entered before carrier selection, so the picker filters by pickup origin and delivery type
 - The agreement picker supports name/address search and Previous/Next pagination with up to 6 matching carriers per page
 - Selected carriers have a clear badge and selecting a carrier does not move the user away from the current form position
 
