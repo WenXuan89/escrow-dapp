@@ -1449,9 +1449,10 @@ async function createAgreement(event) {
     if (origin === destination) return showValidationError("Pickup and delivery locations must be different.", "#destination");
     if (Number($("#weight").value) <= 0) return showValidationError("Enter a parcel weight greater than 0 kg.", "#weight");
     if (!selectedSpeed) return showValidationError("Choose a delivery speed.", "#deliverySpeed");
-    if (!carrier) return showValidationError("Choose a carrier that serves this destination and offers the selected delivery type.", "#carrierPickerSearch");
+    if (!carrier) return showValidationError("Choose a carrier that serves this pickup location and offers the selected delivery type.", "#carrierPickerSearch");
 
     const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
+    if (carrierData && carrierData.profile?.isSet) {
     if (carrierData && carrierData.profile?.isSet) {
       const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
       const originBit = locationBit(origin);
@@ -1461,6 +1462,7 @@ async function createAgreement(event) {
       if (!(carrierData.profile.deliveryTypes & speedBit)) {
         return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
       }
+    }
     }
     
     if (!ethValue || Number(ethValue) <= 0) return showValidationError("Enter the agreement value in ETH. It must be greater than zero.", "#totalValue");
@@ -2237,9 +2239,13 @@ function bindEvents() {
     updatePriceSuggestion(false);
     renderCarriers();
   });
-  el.addEventListener("change", () => {
+  $("#origin").addEventListener("change", () => {
     updatePriceSuggestion(false);
     renderCarriers();
+    $("#selectedCarrier").value = "";
+    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    updateCarrierPicker(true);
+  });
   });
 });
 ["origin", "destination", "deliverySpeed"].forEach(id => {
