@@ -1,6 +1,57 @@
+// File: contracts\ReputationToken.sol
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
-import "./ReputationToken.sol";
+
+contract ReputationToken {
+
+    address public minter;
+    address public owner;
+
+    mapping(address => uint256) public balances;
+
+    event Mint(address indexed to, uint256 amount);
+    event MinterChanged(address indexed oldMinter, address indexed newMinter);
+
+    modifier onlyMinter() {
+        require(
+            msg.sender == minter, "Only the Escrow contract can mint"
+        );
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(
+            msg.sender == owner, "Only owner can perform this action"
+        );
+        _;
+    }
+
+constructor() {
+        owner = msg.sender;
+        minter = msg.sender;
+    }
+
+    function setMinter(address newMinter) public onlyOwner {
+        require(newMinter != address(0), "Invalid minter address");
+
+        address oldMinter = minter;
+        minter = newMinter;
+
+        emit MinterChanged(oldMinter, newMinter);
+    }
+
+    function mint(address to, uint256 amount) public onlyMinter {
+        balances[to] += amount;
+        emit Mint(to, amount);
+    }
+
+    function balanceOf(address account) public view returns (uint256) {
+        return balances[account];
+    }
+}
+
+// File: contracts\Escrow.sol
 
 contract Escrow {
 
@@ -71,7 +122,7 @@ contract Escrow {
     }
 
     struct CarrierProfile {
-        uint16 locations;
+        uint8 location;
         uint8 deliveryTypes;
         bool isSet;
     }
@@ -100,7 +151,6 @@ contract Escrow {
     uint256 public arbitratorEarnings;
     uint256 public completionReward = 100;
     uint256 public disputeWinReward = 100;
-    uint256 public constant MAX_REPUTATION_REWARD = 500;
 
     /* =========
      * EVENTS
@@ -122,7 +172,7 @@ contract Escrow {
     event CommissionCollected(uint256 indexed agreementId, uint256 amount);
     event CommissionWithdrawn(uint256 amount);
     event ReputationRewardsUpdated(uint256 completionReward, uint256 disputeWinReward);
-    event CarrierProfileUpdated(address indexed carrier, uint16 locations, uint8 deliveryTypes);
+    event CarrierProfileUpdated(address indexed carrier, uint8 location, uint8 deliveryTypes);
 
     /* ===========
      * MODIFIERS
@@ -204,21 +254,19 @@ contract Escrow {
         emit DisplayNameUpdated(msg.sender, name);
     }
 
-    function setCarrierProfile(uint16 locations, uint8 deliveryTypes) public {
+    function setCarrierProfile(uint8 location, uint8 deliveryTypes) public {
         require(userRole[msg.sender] == Role.Carrier, "Only a registered Carrier can set a profile");
-        require(locations >= 1 && locations <= 65535, "At least one location required");
+        require(location >= 1 && location <= 15, "Invalid location");
         require(deliveryTypes >= 1 && deliveryTypes <= 7, "Invalid delivery type bitmask");
-        
+
         carrierProfiles[msg.sender] = CarrierProfile({
-            locations: locations,
+            location: location,
             deliveryTypes: deliveryTypes,
             isSet: true
         });
-            
-        emit CarrierProfileUpdated(msg.sender, locations, deliveryTypes);
+
+        emit CarrierProfileUpdated(msg.sender, location, deliveryTypes);
     }
-
-
 
     function getAllCarriers() public view returns (address[] memory) {
         return carrierList;
@@ -246,8 +294,8 @@ contract Escrow {
         require(milestoneTypes.length == milestoneOtherDescriptions.length, 
         "Milestone description array length mismatch");
 
-        require(details.origin >= 1 && details.origin <= 16, "Invalid origin");
-        require(details.destination >= 1 && details.destination <= 16, "Invalid destination");
+        require(details.origin >= 1 && details.origin <= 15, "Invalid origin");
+        require(details.destination >= 1 && details.destination <= 15, "Invalid destination");
         require(details.origin != details.destination, "Origin and destination must differ");
         require(details.itemType >= 1 && details.itemType <= 6, "Invalid item type");
         require(details.size >= 1 && details.size <= 4, "Invalid size");
@@ -375,12 +423,12 @@ contract Escrow {
     }
 
     function getCarrierProfile(address carrier) public view returns (
-        uint16 locations,
+        uint8 location,
         uint8 deliveryTypes,
         bool isSet
-        ) {
-            CarrierProfile storage p = carrierProfiles[carrier];
-            return (p.locations, p.deliveryTypes, p.isSet);
+    ) {
+        CarrierProfile storage p = carrierProfiles[carrier];
+        return (p.location, p.deliveryTypes, p.isSet);
     }
 
     function getUserAgreements(address user)
@@ -690,14 +738,12 @@ contract Escrow {
 
     function setCompletionReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Completion reward must be greater than zero");
-        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         completionReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }
 
     function setDisputeWinReward(uint256 newReward) public onlyArbitrator {
         require(newReward > 0, "Dispute reward must be greater than zero");
-        require(newReward <= MAX_REPUTATION_REWARD, "Reward exceeds maximum");
         disputeWinReward = newReward;
         emit ReputationRewardsUpdated(completionReward, disputeWinReward);
     }

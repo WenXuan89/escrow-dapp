@@ -1197,9 +1197,9 @@ contract('Escrow + ReputationToken', (accounts) => {
     });
  
     it('lets a carrier set a profile, readable via getCarrierProfile', async () => {
-      await escrow.setCarrierProfile(5, 3, { from: carrier }); // location 5, Standard+Fast bitmask
+      await escrow.setCarrierProfile(5, 3, { from: carrier }); // locations bitmask 5, Standard+Fast bitmask
       const p = await escrow.getCarrierProfile(carrier);
-      assert.equal(p.location.toString(), '5');
+      assert.equal(p.locations.toString(), '5');
       assert.equal(p.deliveryTypes.toString(), '3');
       assert.equal(p.isSet, true);
     });
@@ -1208,13 +1208,14 @@ contract('Escrow + ReputationToken', (accounts) => {
       await escrow.setCarrierProfile(1, 1, { from: carrier });
       await escrow.setCarrierProfile(9, 7, { from: carrier });
       const p = await escrow.getCarrierProfile(carrier);
-      assert.equal(p.location.toString(), '9');
+      assert.equal(p.locations.toString(), '9');
       assert.equal(p.deliveryTypes.toString(), '7');
     });
  
-    it('rejects an out-of-range location', async () => {
-      await expectRevert(escrow.setCarrierProfile(0, 1, { from: carrier }), 'Invalid location');
-      await expectRevert(escrow.setCarrierProfile(16, 1, { from: carrier }), 'Invalid location');
+    it('rejects a zero locations bitmask', async () => {
+      // locations is now a uint16 bitmask (up to 65535), so 0 is the only
+      // value that can actually violate the range check from JS.
+      await expectRevert(escrow.setCarrierProfile(0, 1, { from: carrier }), 'At least one location required');
     });
  
     it('rejects an out-of-range delivery-type bitmask', async () => {
@@ -1258,12 +1259,12 @@ contract('Escrow + ReputationToken', (accounts) => {
  
     it('rejects an out-of-range origin', async () => {
       await expectDetailRevert({ origin: 0 }, 'Invalid origin');
-      await expectDetailRevert({ origin: 16 }, 'Invalid origin');
+      await expectDetailRevert({ origin: 17 }, 'Invalid origin');
     });
  
     it('rejects an out-of-range destination', async () => {
       await expectDetailRevert({ destination: 0 }, 'Invalid destination');
-      await expectDetailRevert({ destination: 16 }, 'Invalid destination');
+      await expectDetailRevert({ destination: 17 }, 'Invalid destination');
     });
 
     it('rejects an agreement whose origin and destination are the same', async () => {

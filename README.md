@@ -168,12 +168,15 @@ git push origin your-branch-name
 
 **Carrier Marketplace**
 - Searchable, sortable carrier marketplace
-- Agreement details are entered before carrier selection, so the picker filters by pickup origin and delivery type
+- Agreement details are entered before carrier selection, so the picker first filters by **pickup location (origin)** and then by delivery type
+- Carriers can register **multiple primary locations** (bitmask), and the picker shows any carrier whose location set includes the selected origin
+- Carrier marketplace location filter matches against the carrier's full primary-location set
 - The agreement picker supports name/address search and Previous/Next pagination with up to 6 matching carriers per page
 - Selected carriers have a clear badge and selecting a carrier does not move the user away from the current form position
 
 **Agreement Creation**
 - Route-aware agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo upload
+- Carrier origin validation: Validates that the selected carrier picks up from the chosen origin before agreement creation
 - Carrier speed validation: Validates that selected carrier offers the chosen delivery speed before agreement creation
 - Editable browser-calculated price suggestion and duplicate-milestone validation
 - Live ETH-to-MYR estimate beside the editable ETH amount (ETH remains the on-chain payment currency)
