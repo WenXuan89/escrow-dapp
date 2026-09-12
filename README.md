@@ -167,8 +167,8 @@ git push origin your-branch-name
 
 **Carrier Marketplace**
 - Searchable, sortable carrier marketplace
-- Agreement details are entered before carrier selection, so the picker can filter by location and delivery speed
-- The agreement picker supports name/address search and pagination with up to 12 matching carriers per page
+- Agreement details are entered before carrier selection, so the picker first filters by delivery destination and then by delivery type
+- The agreement picker supports name/address search and Previous/Next pagination with up to 6 matching carriers per page
 - Selected carriers have a clear badge and selecting a carrier does not move the user away from the current form position
 
 **Agreement Creation**
@@ -204,7 +204,8 @@ git push origin your-branch-name
 
 **Dashboard & Analytics**
 - Role-specific dashboards: Shipper/Carrier (wallet balance, locked escrow, active agreements, completed count) and Arbitrator (open agreements, active disputes, completed agreements, resolved disputes)
-- Role-specific notifications highlight new offers, carrier acceptance, funding, reported milestones, overdue deliveries, and disputes
+- Role-specific notifications are built from on-chain events for offers, carrier acceptance/rejection, funding, milestone reports and verification, completion, refunds, and disputes
+- A dedicated Notifications page separates unread, read, and all messages; selecting a message marks it read and opens its agreement
 - Overview recent agreements and activity include accepted-and-beyond agreements only; unaccepted offers remain in carrier notifications for Accept/Reject action
 - Agreement cards and details label both the Shipper MetaMask wallet and Carrier MetaMask wallet
 - Arbitrator reward settings are limited to 1–500 points in the interface and smart contract

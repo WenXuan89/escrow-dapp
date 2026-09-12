@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en">
 
-
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,12 +11,8 @@
   <link
     href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
     rel="stylesheet">
-  <link
-    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap"
-    rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
-
 
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -30,20 +25,12 @@
           <path d="M5 7.5 14 2l9 5.5v13L14 26l-9-5.5v-13Z" />
           <path d="m5 7.5 9 5.5 9-5.5M14 13v13" />
         </svg>
-        <svg viewBox="0 0 28 28">
-          <path d="M5 7.5 14 2l9 5.5v13L14 26l-9-5.5v-13Z" />
-          <path d="m5 7.5 9 5.5 9-5.5M14 13v13" />
-        </svg>
       </span>
       <span>ChainFreight</span>
     </a>
     <div class="wallet-cluster">
       <span id="networkBadge" class="network-badge"><i></i><span>Not connected</span></span>
       <button id="connectButton" class="button button-primary" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 7.5h14a2 2 0 0 1 2 2v9H6a3 3 0 0 1-3-3v-10a3 3 0 0 1 3-3h11v5" />
-          <path d="M15 12h6v4h-6a2 2 0 1 1 0-4Z" />
-        </svg>
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4 7.5h14a2 2 0 0 1 2 2v9H6a3 3 0 0 1-3-3v-10a3 3 0 0 1 3-3h11v5" />
           <path d="M15 12h6v4h-6a2 2 0 1 1 0-4Z" />
@@ -60,14 +47,9 @@
         <h1>Move goods with<br><em>confidence.</em></h1>
         <p>Secure every delivery with milestone-based escrow. Funds move only when progress is reported and verified
           on-chain.</p>
-        <p>Secure every delivery with milestone-based escrow. Funds move only when progress is reported and verified
-          on-chain.</p>
         <div class="hero-actions">
           <button class="button button-primary button-large" type="button" data-connect>
             Connect MetaMask
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="m9 18 6-6-6-6" />
             </svg>
@@ -104,12 +86,6 @@
             <path class="cargo-front" d="m81 74 58-30v38l-58 29V74Z" />
             <path class="cargo-tape" d="m59 32 49 28v22M81 74 59 61" />
             <path class="cargo-arrow" d="M107 93h19m-6-6 6 6-6 6" />
-            <path class="cargo-shadow" d="M23 102h127" />
-            <path class="cargo-box" d="m32 45 58-27 49 26-58 30-49-29Z" />
-            <path class="cargo-side" d="m32 45 49 29v37L32 81V45Z" />
-            <path class="cargo-front" d="m81 74 58-30v38l-58 29V74Z" />
-            <path class="cargo-tape" d="m59 32 49 28v22M81 74 59 61" />
-            <path class="cargo-arrow" d="M107 93h19m-6-6 6 6-6 6" />
           </svg>
         </div>
       </div>
@@ -118,18 +94,6 @@
     <section id="how-it-works" class="how-it-works view">
       <span class="section-label">A trust-minimised workflow</span>
       <div class="workflow-grid">
-        <article><b>01</b>
-          <h3>Create & fund</h3>
-          <p>A shipper chooses a registered carrier, defines milestones and locks the exact agreement value.</p>
-        </article>
-        <article><b>02</b>
-          <h3>Report progress</h3>
-          <p>The assigned carrier reports each checkpoint and can preview a supporting delivery photo.</p>
-        </article>
-        <article><b>03</b>
-          <h3>Verify & release</h3>
-          <p>Shipper verification releases the milestone payout directly from escrow to the carrier.</p>
-        </article>
         <article><b>01</b>
           <h3>Create & fund</h3>
           <p>A shipper chooses a registered carrier, defines milestones and locks the exact agreement value.</p>
@@ -152,8 +116,6 @@
         <h2 id="setupTitle">Connect the deployed contract</h2>
         <p id="setupMessage">Compile and migrate the contracts, then reload this page. You can also paste a deployed
           Escrow address below.</p>
-        <p id="setupMessage">Compile and migrate the contracts, then reload this page. You can also paste a deployed
-          Escrow address below.</p>
         <form id="addressForm" class="inline-form">
           <label class="sr-only" for="contractAddress">Escrow contract address</label>
           <input id="contractAddress" type="text" placeholder="0x… Escrow contract address" autocomplete="off">
@@ -172,12 +134,8 @@
           <button class="role-option" type="button" data-register-role="1">
             <span class="role-icon">↗</span><strong>I'm a Shipper</strong><small>Create, fund and verify
               deliveries</small>
-            <span class="role-icon">↗</span><strong>I'm a Shipper</strong><small>Create, fund and verify
-              deliveries</small>
           </button>
           <button class="role-option" type="button" data-register-role="2">
-            <span class="role-icon">▣</span><strong>I'm a Carrier</strong><small>Report milestones and receive
-              payouts</small>
             <span class="role-icon">▣</span><strong>I'm a Carrier</strong><small>Report milestones and receive
               payouts</small>
           </button>
@@ -191,22 +149,15 @@
           <span id="profileAvatar" class="profile-avatar">0x</span>
           <div><strong id="profileRole">Connected user</strong><button id="profileAddress" class="copy-address"
               type="button">0x…</button></div>
-          <div><strong id="profileRole">Connected user</strong><button id="profileAddress" class="copy-address"
-              type="button">0x…</button></div>
         </div>
         <nav aria-label="Dashboard sections">
           <button class="nav-item active" type="button"
             data-section-target="overviewSection"><span>⌂</span>Overview</button>
           <button class="nav-item" type="button" data-section-target="agreementsSection"><span>▤</span>Agreements <b
               id="agreementNavCount">0</b></button>
-          <button class="nav-item shipper-only" type="button"
-            data-section-target="marketplaceSection"><span>⌕</span>Carrier marketplace</button>
-          <button id="createNavItem" class="nav-item shipper-only" type="button"
-            data-section-target="createSection"><span>＋</span>New agreement</button>
-          <button class="nav-item active" type="button"
-            data-section-target="overviewSection"><span>⌂</span>Overview</button>
-          <button class="nav-item" type="button" data-section-target="agreementsSection"><span>▤</span>Agreements <b
-              id="agreementNavCount">0</b></button>
+          <button id="notificationsNavItem" class="nav-item participant-only" type="button"
+            data-section-target="notificationsSection"><span>◉</span>Notifications <b
+              id="notificationNavCount" class="hidden">0</b></button>
           <button class="nav-item shipper-only" type="button"
             data-section-target="marketplaceSection"><span>⌕</span>Carrier marketplace</button>
           <button id="createNavItem" class="nav-item shipper-only" type="button"
@@ -214,11 +165,7 @@
           <button class="nav-item" type="button" data-section-target="profileSection"><span>◎</span>My profile</button>
           <button id="arbitrationNavItem" class="nav-item arbitrator-only" type="button"
             data-section-target="agreementsSection"><span>⚖</span>Disputes</button>
-          <button id="arbitrationNavItem" class="nav-item arbitrator-only" type="button"
-            data-section-target="agreementsSection"><span>⚖</span>Disputes</button>
         </nav>
-        <div class="sidebar-foot"><span>Smart-contract secured</span><small id="contractAddressShort">Contract not
-            loaded</small></div>
         <div class="sidebar-foot"><span>Smart-contract secured</span><small id="contractAddressShort">Contract not
             loaded</small></div>
       </aside>
@@ -230,22 +177,9 @@
               <h2 id="dashboardGreeting">Good day</h2>
               <p id="dashboardIntro">Here's what is happening with your deliveries.</p>
             </div>
-            <div><span id="dashboardEyebrow" class="section-label">Dashboard</span>
-              <h2 id="dashboardGreeting">Good day</h2>
-              <p id="dashboardIntro">Here's what is happening with your deliveries.</p>
-            </div>
             <button id="refreshButton" class="button button-secondary" type="button"><span>↻</span> Refresh</button>
           </div>
           <div class="stat-grid">
-            <article class="stat-card accent"><span id="statOneLabel">Wallet balance</span><strong
-                id="walletBalance">—</strong><small id="statOneHelp">Connected account</small></article>
-            <article class="stat-card"><span id="statTwoLabel">Locked in my escrows</span><strong
-                id="escrowBalance">—</strong><small id="statTwoHelp">Funded minus released</small></article>
-            <article class="stat-card"><span id="statThreeLabel">Active agreements</span><strong
-                id="activeCount">—</strong><small id="statThreeHelp">Created, accepted, funded or in progress</small>
-            </article>
-            <article class="stat-card"><span id="statFourLabel">Completed</span><strong
-                id="completedCount">—</strong><small id="statFourHelp">Successfully settled</small></article>
             <article class="stat-card accent"><span id="statOneLabel">Wallet balance</span><strong
                 id="walletBalance">—</strong><small id="statOneHelp">Connected account</small></article>
             <article class="stat-card"><span id="statTwoLabel">Locked in my escrows</span><strong
@@ -263,16 +197,7 @@
                 <h3>Commission and reputation rewards</h3>
               </div>
             </div>
-            <div class="panel-heading">
-              <div><span class="section-label">Arbitrator controls</span>
-                <h3>Commission and reputation rewards</h3>
-              </div>
-            </div>
             <div class="admin-control-grid">
-              <div class="earnings-card"><span>Available commission</span><strong id="arbitratorEarnings">0
-                  ETH</strong><small>5% collected from verified milestones and carrier-favouring dispute
-                  payouts</small><button id="withdrawCommissionButton" class="button button-primary"
-                  type="button">Withdraw commission</button></div>
               <div class="earnings-card"><span>Available commission</span><strong id="arbitratorEarnings">0
                   ETH</strong><small>5% collected from verified milestones and carrier-favouring dispute
                   payouts</small><button id="withdrawCommissionButton" class="button button-primary"
@@ -314,11 +239,6 @@
                   <h3>Registered carriers</h3>
                 </div>
               </div>
-              <div class="panel-heading">
-                <div><span class="section-label">Marketplace</span>
-                  <h3>Registered carriers</h3>
-                </div>
-              </div>
               <p class="panel-copy">Select a carrier to begin a new agreement.</p>
               <div id="carrierQuickList" class="carrier-quick-list"></div>
             </div>
@@ -331,25 +251,28 @@
               <div id="activityFeed" class="activity-feed">
                 <div class="skeleton-row"></div>
               </div>
-              <div class="panel-heading">
-                <div><span class="section-label">On-chain log</span>
-                  <h3>Activity feed</h3>
-                </div>
-              </div>
-              <div id="activityFeed" class="activity-feed">
-                <div class="skeleton-row"></div>
-              </div>
             </div>
           </div>
         </section>
 
+        <section id="notificationsSection" class="dashboard-section hidden participant-only">
+          <div class="section-heading compact">
+            <div><span class="section-label">Delivery messages</span>
+              <h2>Notifications</h2>
+              <p>Select a message to open the related agreement. Read messages remain available in the Read tab.</p>
+            </div>
+            <button id="markAllNotificationsRead" class="button button-secondary" type="button">Mark all as read</button>
+          </div>
+          <div class="notification-toolbar" role="group" aria-label="Filter notifications">
+            <button class="filter-chip active" type="button" data-notification-filter="unread">Unread <b id="unreadNotificationCount">0</b></button>
+            <button class="filter-chip" type="button" data-notification-filter="read">Read</button>
+            <button class="filter-chip" type="button" data-notification-filter="all">All</button>
+          </div>
+          <div id="notificationCentreList" class="notification-centre-list" aria-live="polite"></div>
+        </section>
+
         <section id="agreementsSection" class="dashboard-section hidden">
           <div class="section-heading compact">
-            <div><span class="section-label">On-chain participation</span>
-              <h2 id="agreementSectionTitle">Agreements</h2>
-              <p id="agreementSectionCopy">Open an agreement to view balance, deadline and chronological milestone
-                history.</p>
-            </div>
             <div><span class="section-label">On-chain participation</span>
               <h2 id="agreementSectionTitle">Agreements</h2>
               <p id="agreementSectionCopy">Open an agreement to view balance, deadline and chronological milestone
@@ -361,11 +284,7 @@
             <button id="activeFilterButton" class="filter-chip" type="button" data-filter="active">Active</button>
             <button id="attentionFilterButton" class="filter-chip" type="button" data-filter="attention">Needs
               attention</button>
-            <button id="attentionFilterButton" class="filter-chip" type="button" data-filter="attention">Needs
-              attention</button>
             <button id="closedFilterButton" class="filter-chip" type="button" data-filter="closed">Closed</button>
-            <div id="agreementDateFilters" class="date-filter-controls" role="group"
-              aria-label="Filter agreements by deadline">
             <div id="agreementDateFilters" class="date-filter-controls" role="group"
               aria-label="Filter agreements by deadline">
               <label class="compact-filter">Deadline month<input id="agreementMonth" type="month"></label>
@@ -384,27 +303,8 @@
               <p>Search by display name or wallet, then filter by service area and delivery type.</p>
             </div>
           </div>
-          <div class="section-heading compact">
-            <div><span class="section-label">Registered on-chain</span>
-              <h2>Carrier marketplace</h2>
-              <p>Search by display name or wallet, then filter by service area and delivery type.</p>
-            </div>
-          </div>
           <div class="marketplace-tools">
             <label>Search<input id="carrierSearch" type="search" placeholder="Name or 0x address"></label>
-            <label>Location<select id="carrierLocationFilter">
-                <option value="0">All locations</option>
-              </select></label>
-            <label>Delivery type<select id="carrierSpeedFilter">
-                <option value="0">All types</option>
-                <option value="1">Standard</option>
-                <option value="2">Express</option>
-                <option value="4">Same day</option>
-              </select></label>
-            <label>Sort<select id="carrierSort">
-                <option value="name">Name A–Z</option>
-                <option value="reputation">Highest reputation</option>
-              </select></label>
             <label>Location<select id="carrierLocationFilter">
                 <option value="0">All locations</option>
               </select></label>
@@ -465,37 +365,7 @@
                   <option value="2">Protected</option>
                   <option value="3">Premium</option>
                 </select></label>
-              <label>Item type<select id="itemType" name="itemType" required>
-                  <option value="1">Documents</option>
-                  <option value="2">Electronics</option>
-                  <option value="3">Food</option>
-                  <option value="4">Clothing</option>
-                  <option value="5">Fragile goods</option>
-                  <option value="6">Other</option>
-                </select></label>
-              <label>Parcel size<select id="parcelSize" name="size" required>
-                  <option value="1">Small</option>
-                  <option value="2">Medium</option>
-                  <option value="3">Large</option>
-                  <option value="4">Oversized</option>
-                </select></label>
-              <label>Weight (kg)<input id="weight" name="weight" type="number" min="0.01" step="0.01" value="1"
-                  required></label>
-              <label>Delivery speed<select id="deliverySpeed" name="deliverySpeed" required>
-                  <option value="1">Standard</option>
-                  <option value="2">Express</option>
-                  <option value="3">Same day</option>
-                </select></label>
-              <label>Guarantee tier<select id="guaranteeTier" name="guaranteeTier" required>
-                  <option value="1">Basic</option>
-                  <option value="2">Protected</option>
-                  <option value="3">Premium</option>
-                </select></label>
               <div class="image-input-card full-field" data-image-input>
-                <div><strong>Parcel photos (optional)</strong><small>Select one or more photos. Click a preview to
-                    enlarge it, or × to remove it and choose again.</small></div>
-                <label class="file-button">Choose photos<input id="parcelPhotoFile" type="file" accept="image/*"
-                    multiple></label>
                 <div><strong>Parcel photos (optional)</strong><small>Select one or more photos. Click a preview to
                     enlarge it, or × to remove it and choose again.</small></div>
                 <label class="file-button">Choose photos<input id="parcelPhotoFile" type="file" accept="image/*"
@@ -518,7 +388,7 @@
               <div class="form-step"><b>2</b>
                 <div>
                   <h3>Select a carrier</h3>
-                  <p>Only carriers matching the pickup location and delivery speed are shown.</p>
+                  <p>Carriers are first matched to the destination, then checked for the selected delivery type. Six carriers are shown per page.</p>
                 </div>
               </div>
               <input id="selectedCarrier" name="carrier" type="hidden" required>
@@ -540,18 +410,10 @@
                   <p>Build the delivery journey. Every percentage must be above zero.</p>
                 </div><span id="percentageTotal" class="percentage-total">0 / 100%</span>
               </div>
-              <div class="form-step"><b>3</b>
-                <div>
-                  <h3>Milestone payouts</h3>
-                  <p>Build the delivery journey. Every percentage must be above zero.</p>
-                </div><span id="percentageTotal" class="percentage-total">0 / 100%</span>
-              </div>
               <div id="milestoneRows" class="milestone-rows"></div>
               <button id="addMilestoneButton" class="button button-secondary" type="button">＋ Add milestone</button>
             </div>
             <div class="submit-panel">
-              <p class="submit-note">After creation, the carrier must accept the agreement. Funding becomes available to
-                the shipper only after acceptance.</p>
               <p class="submit-note">After creation, the carrier must accept the agreement. Funding becomes available to
                 the shipper only after acceptance.</p>
               <button class="button button-primary button-large" type="submit">Create agreement <span>→</span></button>
@@ -560,12 +422,6 @@
         </section>
 
         <section id="profileSection" class="dashboard-section hidden">
-          <div class="section-heading compact">
-            <div><span class="section-label">Public on-chain identity</span>
-              <h2>My profile</h2>
-              <p>Your display name helps participants recognise this wallet.</p>
-            </div>
-          </div>
           <div class="section-heading compact">
             <div><span class="section-label">Public on-chain identity</span>
               <h2>My profile</h2>
@@ -593,7 +449,7 @@
                     value="1">Standard</label><label class="check-label"><input name="deliveryType" type="checkbox"
                     value="2">Express</label><label class="check-label"><input name="deliveryType" type="checkbox"
                     value="4">Same day</label>
-                <small class="fieldset-help">You may select one delivery type or several types at the same time.</small>
+                <small class="fieldset-help">Select one or more delivery types.</small>
               </fieldset><button class="button button-primary" type="submit">Save carrier profile</button>
             </form>
             <article id="backendNotice" class="panel compatibility-card arbitrator-only"><span
@@ -622,9 +478,6 @@
       <div class="dialog-actions"><button class="button button-secondary" type="button"
           data-close-action-dialog>Cancel</button><button id="actionSubmit" class="button button-primary"
           type="submit">Confirm</button></div>
-      <div class="dialog-actions"><button class="button button-secondary" type="button"
-          data-close-action-dialog>Cancel</button><button id="actionSubmit" class="button button-primary"
-          type="submit">Confirm</button></div>
     </form>
   </dialog>
 
@@ -635,10 +488,6 @@
   </dialog>
 
   <div id="transactionOverlay" class="transaction-overlay hidden" role="status" aria-live="polite">
-    <div class="transaction-card"><span class="loader"></span><strong id="transactionTitle">Confirm in your
-        wallet</strong>
-      <p id="transactionMessage">Waiting for transaction confirmation…</p>
-    </div>
     <div class="transaction-card"><span class="loader"></span><strong id="transactionTitle">Confirm in your
         wallet</strong>
       <p id="transactionMessage">Waiting for transaction confirmation…</p>
@@ -661,17 +510,6 @@
           maxlength="120" placeholder="Describe this checkpoint"></label>
       <label class="percentage-label">Payout<input class="milestone-percentage" type="number" min="1" max="100" step="1"
           placeholder="30" required><span>%</span></label>
-          <option value="1">Pickup confirmed</option>
-          <option value="2">Departed origin</option>
-          <option value="3">In-transit checkpoint</option>
-          <option value="4">Arrived destination</option>
-          <option value="5">Final delivery</option>
-          <option value="6">Other</option>
-        </select></label>
-      <label class="other-description hidden">Description<input class="milestone-description" type="text"
-          maxlength="120" placeholder="Describe this checkpoint"></label>
-      <label class="percentage-label">Payout<input class="milestone-percentage" type="number" min="1" max="100" step="1"
-          placeholder="30" required><span>%</span></label>
       <button class="remove-milestone" type="button" aria-label="Remove milestone">×</button>
     </div>
   </template>
@@ -679,6 +517,5 @@
   <script src="/vendor/web3.min.js"></script>
   <script src="app.js"></script>
 </body>
-
 
 </html>

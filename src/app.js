@@ -1,8 +1,6 @@
 // import { PINATA_JWT } from './config.js';
-// import { PINATA_JWT } from './config.js';
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
-const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
 const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
@@ -10,11 +8,7 @@ const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan"
 const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
 const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
-const DELIVERY_SPEEDS = ["", "Standard", "Express", "Same day"];
 const GUARANTEE_TIERS = ["", "Basic", "Protected", "Premium"];
-const ACTIVE_STATUSES = [3, 4];
-const OPEN_STATUSES = [0, 1, 3, 4];
-const CLOSED_STATUSES = [2, 5, 6, 7];
 const ACTIVE_STATUSES = [3, 4];
 const OPEN_STATUSES = [0, 1, 3, 4];
 const CLOSED_STATUSES = [2, 5, 6, 7];
@@ -24,8 +18,9 @@ const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 const PINATA_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI2NjNlZDI5NC1lZjRiLTRiNDctOGQyNy1hNTlhZDQxNDAwMzMiLCJlbWFpbCI6Indlbnh1YW5uODlAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImZmMzQ5NmViYzMxZDdjMTMwNWZhIiwic2NvcGVkS2V5U2VjcmV0IjoiMWNkNGJlZmQ3NzcxYWNiMmJmOTRkODBmZjI0NWQ5YzE5MzdiZDE5NmZjNWYyZDIzMzY3YzYxODRkNjY3MTlkYyIsImV4cCI6MTgyMDMxNzU2OX0.1JYGzd4hSomaSwNTCY5X79aEzHOk-7ANmUDMPbxwQoQ';
 const REWARD_MIN = 1;
 const REWARD_MAX = 500;
-const CARRIER_PAGE_SIZE = 12;
+const CARRIER_PAGE_SIZE = 6;
 const RECENT_AGREEMENT_STATUSES = [1, 3, 4, 5, 6, 7];
+const NOTIFICATION_EVENTS = ["AgreementCreated", "AgreementAccepted", "AgreementRejected", "AgreementFunded", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "DisputeResolved"];
 const ETH_MYR_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=myr&include_last_updated_at=true";
 
 const state = {
@@ -42,6 +37,9 @@ const state = {
   agreements: [],
   carriers: [],
   activity: [],
+  allActivity: [],
+  notifications: [],
+  notificationFilter: "unread",
   displayName: "",
   reputation: "0",
   completionReputation: "0",
@@ -69,61 +67,6 @@ const shortAddress = (address, head = 6, tail = 4) => address ? `${address.slice
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
-
-async function uploadToIPFS(file) {
-    if (!file) {
-        console.warn('No file provided to uploadToIPFS');
-        return null;
-    }
-    
-    try {
-        showToast('Uploading to IPFS...', 'info');
-        
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        
-        const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${PINATA_JWT}`  // ← Uses imported key
-            },
-            body: formData,
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Upload failed: ${response.status} - ${errorText}`);
-        }
-
-        const result = await response.json();
-        const cid = result.IpfsHash || result.Hash || result.cid?.['/'] || result.cid?.toString();
-        
-        if (!cid) {
-            throw new Error('No CID returned from IPFS');
-        }
-
-        console.log('Uploaded to IPFS:', cid);
-        console.log('View at:', `${IPFS_GATEWAY}${cid}`);
-        
-        showToast(`Uploaded: ${cid.substring(0, 16)}...`, 'success');
-        return cid;
-        
-    } catch (error) {
-        console.error('IPFS upload failed:', error);
-        if (error.name === 'AbortError') {
-            showToast('Upload timed out. Proceeding without photo.', 'error');
-        } else {
-            showToast('Upload failed. Proceeding without photo.', 'error');
-        }
-        return null;
-    }
-}
 
 async function uploadToIPFS(file) {
     if (!file) {
@@ -266,7 +209,6 @@ function renderAgreementFilterState(resultCount) {
     const label = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
     return void (summary.textContent = `${countLabel} with deadline in ${label}`);
   }
-  summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
   summary.textContent = state.filter === "closed" ? `${countLabel} · most recently closed` : countLabel;
 }
 
@@ -574,11 +516,10 @@ function configureDashboardForRole() {
   const isShipper = state.role === ROLE.SHIPPER;
   const isArbitrator = state.role === ROLE.ARBITRATOR;
   
-  
   $$(".shipper-only").forEach(node => node.classList.toggle("role-hidden", !isShipper));
   $$(".carrier-only").forEach(node => node.classList.toggle("role-hidden", state.role !== ROLE.CARRIER));
   $$(".arbitrator-only").forEach(node => node.classList.toggle("role-hidden", !isArbitrator));
-  
+  $$(".participant-only").forEach(node => node.classList.toggle("role-hidden", isArbitrator));
   
   $("#profileRole").textContent = roleLabel(state.role);
   $("#profileAddress").textContent = shortAddress(state.account, 8, 6);
@@ -595,7 +536,6 @@ function configureDashboardForRole() {
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
   $("#attentionFilterButton").classList.toggle("hidden", isArbitrator);
   
-  
   state.filter = "all";
   resetAgreementDateFilters(false);
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
@@ -604,15 +544,12 @@ function configureDashboardForRole() {
   $("#statOneHelp").textContent = "Connected account";
   $("#statTwoLabel").textContent = "Locked in escrow";
   $("#statTwoHelp").textContent = "Total escrow balance";
-  $("#statTwoLabel").textContent = "Locked in escrow";
-  $("#statTwoHelp").textContent = "Total escrow balance";
   $("#statThreeLabel").textContent = "Active agreements";
   $("#statThreeHelp").textContent = "Funded or in progress";
   $("#statFourLabel").textContent = "Completed";
   $("#statFourHelp").textContent = "Successfully settled";
 
   if (isArbitrator) {
-    $("#statOneLabel").textContent = "Open agreements";
     $("#statOneLabel").textContent = "Open agreements";
     $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
     $("#statTwoLabel").textContent = "Active disputes";
@@ -724,33 +661,31 @@ async function refreshActivity() {
       toBlock: "latest" 
     });
     
+    const participantAgreementIds = new Set(state.agreements.map(agreement => String(agreement.id)));
     const acceptedAgreementIds = new Set(state.agreements.filter(agreement => RECENT_AGREEMENT_STATUSES.includes(agreement.status)).map(agreement => String(agreement.id)));
-    const visible = state.role === ROLE.ARBITRATOR ? events : events.filter(event => {
+    const participantEvents = state.role === ROLE.ARBITRATOR ? events : events.filter(event => {
       const agreementId = event.returnValues?.agreementId;
-      return agreementId !== undefined && acceptedAgreementIds.has(String(agreementId));
+      return agreementId !== undefined && participantAgreementIds.has(String(agreementId));
     });
-    
-    const recent = visible.slice(-50).reverse();
-    const blockNumbers = [...new Set(recent.map(event => event.blockNumber))];
+    const relevant = participantEvents.slice(-200).reverse();
+    const blockNumbers = [...new Set(relevant.map(event => event.blockNumber))];
     const blocks = await Promise.all(blockNumbers.map(number => state.web3.eth.getBlock(number)));
     const timestamps = Object.fromEntries(blocks.map(block => [block.number, Number(block.timestamp)]));
-    
-    state.activity = recent
+    state.allActivity = relevant
       .map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 }))
       .sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber);
-    
+    state.activity = state.allActivity
+      .filter(event => {
+        const agreementId = event.returnValues?.agreementId;
+        return state.role === ROLE.ARBITRATOR || (agreementId !== undefined && acceptedAgreementIds.has(String(agreementId)));
+      })
+      .slice(0, 50);
+    buildNotifications();
     renderActivity();
-  } catch (_) { 
-    state.activity = []; 
-  }
-    
-    state.activity = recent
-      .map(event => ({ ...event, timestamp: timestamps[event.blockNumber] || 0 }))
-      .sort((a, b) => b.timestamp - a.timestamp || b.blockNumber - a.blockNumber);
-    
-    renderActivity();
-  } catch (_) { 
-    state.activity = []; 
+  } catch (_) {
+    state.activity = [];
+    state.allActivity = [];
+    buildNotifications();
   }
 }
 
@@ -863,52 +798,9 @@ function needsAttention(agreement) {
   }
   
   return false;
-
-  if (agreement.status === 7) return true;
-  if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) return true;
-  
-  if (state.role === ROLE.SHIPPER) {
-    if (agreement.status === 0) return true;
-    
-    if (agreement.status === 1) return true;
-
-    if ([3, 4].includes(agreement.status) && 
-        agreement.milestones.some(m => m.reported && !m.completed)) return true;
-    
-    if ([3, 4].includes(agreement.status) && 
-        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
-  }
-  
-
-  if (state.role === ROLE.CARRIER) {
-
-    if (agreement.status === 0) return true;
-
-    if (agreement.status === 1) return true;
-    
-    if ([3, 4].includes(agreement.status) && 
-        agreement.milestones.some(m => !m.reported && !m.completed)) return true;
-  }
-  
-  return false;
 }
 
 function renderDashboard() {
-  const created = state.agreements.filter(a => a.status === 0).length;
-  const accepted = state.agreements.filter(a => a.status === 1).length;
-  const rejected = state.agreements.filter(a => a.status === 2).length;
-  const funded = state.agreements.filter(a => a.status === 3).length;
-  const inProgress = state.agreements.filter(a => a.status === 4).length;
-  const completed = state.agreements.filter(a => a.status === 5).length;
-  const refunded = state.agreements.filter(a => a.status === 6).length;
-  const disputed = state.agreements.filter(a => a.status === 7).length;
-
-  const active = funded + inProgress;
-  const open = created + accepted + funded + inProgress;
-  const total = state.agreements.length;
-  const activeDisputes = state.agreements.filter(a => a.status === 7).length;
-  const resolvedDisputes = state.agreements.filter(a => a.disputeReason > 0 && a.status !== 7).length;
-  
   const created = state.agreements.filter(a => a.status === 0).length;
   const accepted = state.agreements.filter(a => a.status === 1).length;
   const rejected = state.agreements.filter(a => a.status === 2).length;
@@ -930,21 +822,7 @@ function renderDashboard() {
   }, state.demo ? 0 : 0n);
   
   if (state.role !== ROLE.ARBITRATOR) {
-  
-  if (state.role !== ROLE.ARBITRATOR) {
     $("#escrowBalance").textContent = formatEth(totalEscrow);
-    $("#activeCount").textContent = active;
-    $("#completedCount").textContent = completed;
-    $("#agreementNavCount").textContent = total;
-  }
-
-  if (state.role === ROLE.ARBITRATOR) {
-
-    $("#walletBalance").textContent = open;
-    $("#escrowBalance").textContent = activeDisputes;
-    $("#activeCount").textContent = completed;
-    $("#completedCount").textContent = resolvedDisputes;
-    $("#agreementNavCount").textContent = activeDisputes + resolvedDisputes;
     $("#activeCount").textContent = active;
     $("#completedCount").textContent = completed;
     $("#agreementNavCount").textContent = total;
@@ -983,41 +861,115 @@ function renderRecentAgreements() {
   }).join("");
 }
 
-function notificationItems() {
-  const items = [];
-  state.agreements.forEach(agreement => {
-    if (state.role === ROLE.SHIPPER) {
-      if (agreement.status === 1) items.push({ agreement, level: "success", title: `Carrier accepted Agreement #${agreement.id}`, message: "The agreement is ready for you to fund." });
-      const reported = agreement.milestones.filter(milestone => milestone.reported && !milestone.completed).length;
-      if ([3, 4].includes(agreement.status) && reported) items.push({ agreement, level: "attention", title: `${reported} milestone${reported === 1 ? " is" : "s are"} ready to verify`, message: `Open Agreement #${agreement.id} to review the carrier's update.` });
-      if ([3, 4].includes(agreement.status) && agreement.deadline < Date.now() / 1000) items.push({ agreement, level: "danger", title: `Agreement #${agreement.id} is past its deadline`, message: "Open it to check the remaining refund." });
-    }
-    if (state.role === ROLE.CARRIER) {
-      if (agreement.status === 0) items.push({ agreement, level: "attention", title: `New Agreement #${agreement.id} needs your response`, message: "Review the delivery details, then accept or reject it." });
-      if (agreement.status === 3) items.push({ agreement, level: "success", title: `Agreement #${agreement.id} has been funded`, message: "You can now report delivery milestones." });
-    }
-    if (state.role === ROLE.ARBITRATOR && agreement.status === 7) items.push({ agreement, level: "danger", title: `Agreement #${agreement.id} has an active dispute`, message: "Review the reason and evidence before making a decision." });
+function notificationStorageKey() {
+  const address = state.contract?.options?.address || "preview";
+  return `chainfreight:read-notifications:${state.chainId || state.networkId || "local"}:${String(address).toLowerCase()}:${String(state.account || "guest").toLowerCase()}`;
+}
+
+function readNotificationIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(notificationStorageKey()) || "[]")); }
+  catch (_) { return new Set(); }
+}
+
+function saveReadNotificationIds(ids) {
+  localStorage.setItem(notificationStorageKey(), JSON.stringify([...ids].slice(-1000)));
+}
+
+function notificationCopy(event, agreement) {
+  const milestoneIndex = Number(event.returnValues?.milestoneIndex ?? -1);
+  const milestone = agreement.milestones?.[milestoneIndex];
+  const milestoneLabel = milestone ? milestoneName(milestone) : `Milestone ${milestoneIndex + 1}`;
+  const amount = event.returnValues?.amount ?? event.returnValues?.payoutAmount;
+  const lastVerifiedEvent = state.allActivity.find(item => item.event === "MilestoneVerified" && String(item.returnValues?.agreementId) === String(agreement.id));
+  const completesAgreement = agreement.status === 5 && lastVerifiedEvent === event;
+  const copies = {
+    AgreementCreated: { level: "attention", title: `New Agreement #${agreement.id} needs your response`, message: "Review the delivery details, then accept or reject the offer." },
+    AgreementAccepted: { level: "success", title: `Carrier accepted Agreement #${agreement.id}`, message: "The agreement is ready for the shipper to fund." },
+    AgreementRejected: { level: "danger", title: `Carrier rejected Agreement #${agreement.id}`, message: "This agreement cannot be funded. Choose another carrier for a new agreement." },
+    AgreementFunded: { level: "success", title: `Agreement #${agreement.id} has been funded`, message: `${amount ? `${formatEth(amount)} is locked in escrow. ` : ""}The carrier can start reporting milestones.` },
+    MilestoneReported: { level: "attention", title: `${milestoneLabel} was reported`, message: `Open Agreement #${agreement.id} to review the carrier's update.` },
+    MilestoneVerified: completesAgreement
+      ? { level: "success", title: `Agreement #${agreement.id} is completed`, message: `${milestoneLabel} was verified${amount ? ` and ${formatEth(amount)} was released` : ""}.` }
+      : { level: "success", title: `${milestoneLabel} was verified`, message: `${amount ? `${formatEth(amount)} was released to the carrier.` : "The milestone payout was released to the carrier."}` },
+    AgreementRefunded: { level: "success", title: `Refund received for Agreement #${agreement.id}`, message: `${amount ? `${formatEth(amount)} was returned` : "The remaining escrow was returned"} to the shipper wallet.` },
+    DisputeRaised: { level: "danger", title: `Dispute opened for Agreement #${agreement.id}`, message: "Payments are paused while the arbitrator reviews the case." },
+    DisputeResolved: { level: "success", title: `Dispute resolved for Agreement #${agreement.id}`, message: event.returnValues?.resolution ? `Decision: ${event.returnValues.resolution}.` : "The arbitrator recorded a final decision." }
+  };
+  return copies[event.event];
+}
+
+function notificationApplies(event, agreement) {
+  if (!NOTIFICATION_EVENTS.includes(event.event)) return false;
+  if (state.role === ROLE.ARBITRATOR) return event.event === "DisputeRaised";
+  if (state.role === ROLE.SHIPPER) return ["AgreementAccepted", "AgreementRejected", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "DisputeResolved"].includes(event.event);
+  if (state.role === ROLE.CARRIER) return ["AgreementCreated", "AgreementFunded", "MilestoneVerified", "DisputeRaised", "DisputeResolved"].includes(event.event);
+  return false;
+}
+
+function buildNotifications() {
+  const readIds = readNotificationIds();
+  state.notifications = state.allActivity.flatMap((event, index) => {
+    const agreementId = event.returnValues?.agreementId;
+    const agreement = state.agreements.find(item => String(item.id) === String(agreementId));
+    if (!agreement || !notificationApplies(event, agreement)) return [];
+    const copy = notificationCopy(event, agreement);
+    if (!copy) return [];
+    const id = `${event.transactionHash || event.blockHash || "event"}:${event.logIndex ?? index}:${event.event}:${agreement.id}`;
+    return [{ id, agreement, agreementId: agreement.id, timestamp: event.timestamp || 0, read: readIds.has(id), ...copy }];
   });
-  return items.sort((a, b) => a.agreement.deadline - b.agreement.deadline).slice(0, 8);
+}
+
+function markNotificationRead(id) {
+  const item = state.notifications.find(notification => notification.id === id);
+  if (!item || item.read) return;
+  item.read = true;
+  const readIds = readNotificationIds();
+  readIds.add(id);
+  saveReadNotificationIds(readIds);
+  renderNotifications();
+}
+
+function markAllNotificationsRead() {
+  const readIds = readNotificationIds();
+  state.notifications.forEach(item => { item.read = true; readIds.add(item.id); });
+  saveReadNotificationIds(readIds);
+  renderNotifications();
+  showToast("All notifications have been marked as read.");
+}
+
+function notificationMarkup(item, compact = false) {
+  return `<button class="notification-item ${item.level} ${item.read ? "read" : "unread"}" type="button" data-notification-id="${escapeHtml(item.id)}" data-agreement-id="${item.agreementId}">
+    <span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small>${compact ? "" : `<time>${item.timestamp ? formatDate(item.timestamp) : "Recent update"}</time>`}</span><span aria-hidden="true">→</span>
+  </button>`;
 }
 
 function renderNotifications() {
   const container = $("#notificationList");
   const count = $("#notificationCount");
   if (!container || !count) return;
-  const items = notificationItems();
-  count.textContent = String(items.length);
-  count.classList.toggle("hidden", items.length === 0);
-  const emptyMessage = state.role === ROLE.CARRIER ? "New job offers and funded deliveries will appear here." : state.role === ROLE.SHIPPER ? "Carrier responses and milestone updates will appear here." : "New disputes will appear here when they need review.";
-  container.innerHTML = items.length ? items.map(item => `<button class="notification-item ${item.level}" type="button" data-agreement-id="${item.agreement.id}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.message)}</small></span><span aria-hidden="true">→</span></button>`).join("") : `<div class="empty-state compact"><strong>No action needed right now</strong>${escapeHtml(emptyMessage)}</div>`;
+  const unread = state.notifications.filter(item => !item.read);
+  count.textContent = String(unread.length);
+  count.classList.toggle("hidden", unread.length === 0);
+  const navCount = $("#notificationNavCount");
+  if (navCount) { navCount.textContent = String(unread.length); navCount.classList.toggle("hidden", unread.length === 0); }
+  const unreadCount = $("#unreadNotificationCount");
+  if (unreadCount) unreadCount.textContent = String(unread.length);
+  const emptyMessage = state.role === ROLE.CARRIER ? "New offers, funding, payouts and dispute decisions will appear here." : state.role === ROLE.SHIPPER ? "Carrier responses, milestone reports, refunds and dispute decisions will appear here." : "New disputes will appear here when they need review.";
+  container.innerHTML = unread.length ? unread.slice(0, 4).map(item => notificationMarkup(item, true)).join("") + (unread.length > 4 ? `<button class="text-button notification-view-all" type="button" data-section-target="notificationsSection">View all ${unread.length} unread messages →</button>` : "") : `<div class="empty-state compact"><strong>No unread notifications</strong>${escapeHtml(emptyMessage)}</div>`;
+
+  const centre = $("#notificationCentreList");
+  if (!centre) return;
+  const filtered = state.notificationFilter === "all" ? state.notifications : state.notifications.filter(item => state.notificationFilter === "read" ? item.read : !item.read);
+  centre.innerHTML = filtered.length ? filtered.map(item => notificationMarkup(item)).join("") : `<div class="empty-state"><strong>No ${escapeHtml(state.notificationFilter)} notifications</strong>Messages will remain here after you read them.</div>`;
+  $$('[data-notification-filter]').forEach(button => button.classList.toggle("active", button.dataset.notificationFilter === state.notificationFilter));
+  const markAll = $("#markAllNotificationsRead");
+  if (markAll) markAll.disabled = unread.length === 0;
 }
 
 function agreementMatchesFilter(agreement) {
   let matchesStatus = true;
   if (state.role === ROLE.ARBITRATOR) {
     matchesStatus = agreement.disputeReason > 0;
-    if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
-    if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
     if (state.filter === "active" || state.filter === "attention") matchesStatus = agreement.status === 7;
     if (state.filter === "closed") matchesStatus = agreement.disputeReason > 0 && agreement.status !== 7;
   } else {
@@ -1076,21 +1028,6 @@ function renderCarriers() {
     quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
     updateCarrierPicker();
     renderMarketplace();
-    const quick = $("#carrierQuickList");
-    const picker = $("#carrierPicker");
-    const marketplace = $("#carrierMarketplace");
-    
-    if (!quick || !picker || !marketplace) return;
-    
-    if (!state.carriers.length) {
-        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
-        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
-        marketplace.innerHTML = picker.innerHTML;
-        return;
-    }
-    quick.innerHTML = state.carriers.slice(0, 4).map(carrierCardSmall).join("");
-    updateCarrierPicker();
-    renderMarketplace();
 }
 
 function reputationLabel(points) {
@@ -1113,7 +1050,7 @@ function carrierCard(carrier, selectOnly = false) {
 }
 
 function matchingCarriersForForm() {
-    const origin = Number($("#origin")?.value || 0);
+    const destination = Number($("#destination")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const speedBit = speed <= 3 ? 2 ** (speed - 1) : 0;
     
@@ -1121,7 +1058,7 @@ function matchingCarriersForForm() {
        
         if (!carrier.profile?.isSet) return false;
         
-        if (origin && carrier.profile.location !== origin) return false;
+        if (destination && carrier.profile.location !== destination) return false;
         
         if (speedBit && !(carrier.profile.deliveryTypes & speedBit)) return false;
         
@@ -1131,7 +1068,7 @@ function matchingCarriersForForm() {
 
 function updateCarrierPicker(resetPage = false) {
     const picker = $("#carrierPicker");
-    const origin = Number($("#origin")?.value || 0);
+    const destination = Number($("#destination")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const query = ($("#carrierPickerSearch")?.value || "").trim().toLowerCase();
     const summary = $("#carrierPickerSummary");
@@ -1139,11 +1076,11 @@ function updateCarrierPicker(resetPage = false) {
     let matchingCarriers = matchingCarriersForForm().filter(carrier => !query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
     if (resetPage) state.carrierPickerPage = 1;
     
-    if (!origin) {
+    if (!destination) {
         picker.innerHTML = `
             <div class="empty-state">
-                <strong>Select an origin first</strong>
-                <p>Choose the shipment origin to see available carriers.</p>
+                <strong>Select a destination first</strong>
+                <p>Choose the delivery destination to see carriers serving that location.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
@@ -1157,12 +1094,12 @@ function updateCarrierPicker(resetPage = false) {
         picker.innerHTML = `
             <div class="empty-state">
                 <strong>No carriers match</strong>
-                <p>No carriers in ${LOCATIONS[origin]} offer ${speedLabel} delivery.</p>
-                <p style="font-size:12px;margin-top:8px;">Try changing the delivery speed or origin.</p>
+                <p>No carriers serving ${LOCATIONS[destination]} offer ${speedLabel} delivery.</p>
+                <p style="font-size:12px;margin-top:8px;">Try changing the destination or delivery type.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = query ? "No carrier matches your search and delivery requirements." : "No carrier matches this route and delivery speed.";
+        if (summary) summary.textContent = query ? "No carrier matches your search, destination and delivery type." : "No carrier matches this destination and delivery type.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1364,13 +1301,16 @@ async function createAgreement(event) {
     if (origin === destination) return showValidationError("Pickup and delivery locations must be different.", "#destination");
     if (Number($("#weight").value) <= 0) return showValidationError("Enter a parcel weight greater than 0 kg.", "#weight");
     if (!selectedSpeed) return showValidationError("Choose a delivery speed.", "#deliverySpeed");
-    if (!carrier) return showValidationError("Choose a carrier that matches this pickup location and delivery speed.", "#carrierPickerSearch");
+    if (!carrier) return showValidationError("Choose a carrier that serves this destination and offers the selected delivery type.", "#carrierPickerSearch");
 
     const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
     if (carrierData && carrierData.profile?.isSet) {
         const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
+        if (carrierData.profile.location !== destination) {
+            return showValidationError("The selected carrier does not serve this destination. Choose a carrier from the updated list.", "#carrierPickerSearch");
+        }
         if (!(carrierData.profile.deliveryTypes & speedBit)) {
-            return showValidationError("The selected carrier does not offer this delivery speed. Choose another carrier.", "#carrierPickerSearch");
+            return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
         }
     }
     
@@ -1605,7 +1545,6 @@ function renderAgreementDetail(agreement) {
   
   const details = agreement.details;
   
-  
   $("#agreementDetail").innerHTML = `
     <div class="detail-head">
       <span class="section-label">On-chain agreement</span>
@@ -1781,61 +1720,7 @@ function renderAgreementDetail(agreement) {
           <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
           <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
         ` : ""}
-        <!-- Created (0): Carrier can Accept/Reject -->
-        ${agreement.status === 0 && state.role === ROLE.CARRIER ? `
-          <button class="button button-primary" type="button" data-action="accept">Accept agreement</button>
-          <button class="button button-danger" type="button" data-action="reject">Reject agreement</button>
-        ` : ""}
-        
-        <!-- Created (0): Shipper waits -->
-        ${agreement.status === 0 && state.role === ROLE.SHIPPER ? `
-          <span class="action-note">Waiting for the carrier to accept or reject this agreement.</span>
-        ` : ""}
-        
-        <!-- Accepted (1): Shipper can FUND -->
-        ${agreement.status === 1 && state.role === ROLE.SHIPPER ? `
-          <button class="button button-primary" type="button" data-action="fund">Fund ${formatEth(agreement.totalValue)}</button>
-        ` : ""}
-        
-        <!-- Accepted (1): Carrier waits -->
-        ${agreement.status === 1 && state.role === ROLE.CARRIER ? `
-          <span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>
-        ` : ""}
-        
-        <!-- Rejected (2) -->
-        ${agreement.status === 2 ? `
-          <span class="action-note">This agreement was rejected and cannot be funded.</span>
-        ` : ""}
-        
-        <!-- Funded/InProgress (3,4): Shipper can Extend deadline -->
-        ${state.role === ROLE.SHIPPER && ![2,5,6,7].includes(agreement.status) ? `
-          <button class="button button-secondary" type="button" data-action="extend">Extend deadline</button>
-        ` : ""}
-        
-        <!-- Funded/InProgress (3,4): Participants can Dispute -->
-        ${canDispute ? `
-          <button class="button button-danger" type="button" data-action="dispute">Raise dispute</button>
-        ` : ""}
-        
-        <!-- Funded/InProgress (3,4): Shipper can Refund if deadline passed -->
-        ${canRefund ? `
-          <button class="button button-danger" type="button" data-action="refund">Claim remaining refund</button>
-        ` : ""}
-        
-        <!-- Disputed (7): Participants can Submit Evidence -->
-        ${agreement.status === 7 && isParticipant ? `
-          <button class="button button-secondary" type="button" data-action="evidence">Submit evidence</button>
-        ` : ""}
-        
-        <!-- Disputed (7): Arbitrator can Resolve -->
-        ${agreement.status === 7 && state.role === ROLE.ARBITRATOR ? `
-          <button class="button button-secondary" type="button" data-action="resolve-carrier">Pay carrier</button>
-          <button class="button button-danger" type="button" data-action="resolve-shipper">Refund shipper</button>
-        ` : ""}
       </div>
-    </div>
-  `;
-  
     </div>
   `;
   
@@ -2031,144 +1916,6 @@ async function submitAction(event) {
     } catch (_) {
         // Error already handled by sendTransaction
     }
-    event.preventDefault();
-    const data = new FormData(event.target);
-    const { action, agreementId, milestoneIndex } = state.pendingAction || {};
-    
-    if (state.demo) {
-        $("#actionDialog").close();
-        return showToast("Transactions are disabled in preview mode.", "error");
-    }
-    
-    try {
-
-        if (action === "report") {
-            let proofCID = "";
-            const fileInput = document.querySelector('[name="proofCID"]');
-
-            if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading proof to IPFS", "Uploading milestone proof photo...");
-                try {
-                    proofCID = (await uploadToIPFS(fileInput.files[0])) || "";
-                    if (proofCID) {
-                        console.log('Milestone proof uploaded:', proofCID);
-                        showToast(`Proof uploaded: ${proofCID.substring(0, 12)}...`, 'success');
-                    }
-                } catch (error) {
-                    console.error('Proof upload failed:', error);
-                    showToast('Proof photo upload failed. Proceeding without photo.', 'error');
-                    proofCID = "";
-                } finally {
-                    setTransactionState(false);
-                }
-            }
-            
-            await sendTransaction(
-                state.contract.methods.reportMilestone(agreementId, milestoneIndex, proofCID),
-                {},
-                "Report milestone"
-            );
-        }
-
-        if (action === "extend") {
-            const agreement = state.agreements.find(item => item.id === Number(agreementId));
-            const newDeadline = Math.floor(new Date(String(data.get("newDeadline"))).getTime() / 1000);
-            if (!newDeadline || newDeadline <= Date.now() / 1000 || newDeadline <= agreement.deadline) {
-                return showToast("Choose a deadline later than the current deadline.", "error");
-            }
-            await sendTransaction(
-                state.contract.methods.extendDeadline(agreementId, newDeadline),
-                {},
-                "Extend deadline"
-            );
-        }
-        
-        if (action === "dispute") {
-            const reason = Number(data.get("reason"));
-            const otherReason = reason === 5 ? String(data.get("otherReason") || "").trim() : "";
-            const evidenceDescription = String(data.get("evidenceDescription") || "").trim();
-            
-            let evidenceCID = "";
-            const evidenceFileInput = document.querySelector('[name="evidenceCID"]');
-            
-            if (evidenceFileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to IPFS", "Uploading dispute evidence photo...");
-                try {
-                    evidenceCID = (await uploadToIPFS(evidenceFileInput.files[0])) || "";
-                    if (evidenceCID) {
-                        console.log('Evidence uploaded:', evidenceCID);
-                        showToast(`Evidence uploaded: ${evidenceCID.substring(0, 12)}...`, 'success');
-                    }
-                } catch (error) {
-                    console.error('Evidence upload failed:', error);
-                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
-                    evidenceCID = "";
-                } finally {
-                    setTransactionState(false);
-                }
-            }
-            
-            if (reason === 5 && !otherReason) {
-                return showToast("Enter the other dispute reason.", "error");
-            }
-            
-            await sendTransaction(
-                state.contract.methods.raiseDispute(agreementId, reason, otherReason),
-                {},
-                "Raise dispute"
-            );
-            
-            if (evidenceDescription || evidenceCID) {
-                await sendTransaction(
-                    state.contract.methods.submitEvidence(
-                        agreementId,
-                        evidenceDescription || "Evidence submitted",
-                        evidenceCID
-                    ),
-                    {},
-                    "Submit dispute evidence"
-                );
-            }
-        }
-
-        if (action === "evidence") {
-            const description = String(data.get("description") || "").trim();
-            if (!description) {
-                return showToast("Evidence description is required.", "error");
-            }
-            
-            let fileCID = "";
-            const fileInput = document.querySelector('[name="fileCID"]');
-
-            if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to IPFS", "Uploading evidence photo...");
-                try {
-                    fileCID = (await uploadToIPFS(fileInput.files[0])) || "";
-                    if (fileCID) {
-                        console.log('Evidence uploaded:', fileCID);
-                        showToast(`Evidence uploaded: ${fileCID.substring(0, 12)}...`, 'success');
-                    }
-                } catch (error) {
-                    console.error('Evidence upload failed:', error);
-                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
-                    fileCID = "";
-                } finally {
-                    setTransactionState(false);
-                }
-            }
-            
-            await sendTransaction(
-                state.contract.methods.submitEvidence(agreementId, description, fileCID),
-                {},
-                "Submit evidence"
-            );
-        }
-        
-        $("#actionDialog").close();
-        
-    } catch (_) {
-        // Error already handled by sendTransaction
-    }
 }
 
 async function registerRole(role) {
@@ -2210,7 +1957,14 @@ function seedDemo() {
       { index: 2, type: 5, description: "", percentage: 50, reported: true, completed: true, reportedTimestamp: now - 700000, completedTimestamp: now - 699000, proofCID: "bafyfinaldelivery" }
     ]}
   ];
-  state.activity = [{ event: "MilestoneReported", blockNumber: 48, transactionHash: "0x9156f73c8798d74b37aa001734c4795ddf22" }, { event: "AgreementFunded", blockNumber: 41, transactionHash: "0x20d62eaba4aa321a5998d938726c152d8b31" }];
+  state.allActivity = [
+    { event: "MilestoneReported", blockNumber: 48, logIndex: 1, timestamp: now - 3600, transactionHash: "0x9156f73c8798d74b37aa001734c4795ddf22", returnValues: { agreementId: "4", milestoneIndex: "1" } },
+    { event: "AgreementFunded", blockNumber: 41, logIndex: 0, timestamp: now - 7200, transactionHash: "0x20d62eaba4aa321a5998d938726c152d8b31", returnValues: { agreementId: "4", amount: "4800000000000000000" } },
+    { event: "AgreementAccepted", blockNumber: 39, logIndex: 0, timestamp: now - 10800, transactionHash: "0x681bb9d24f90d50c0a909d46664bacdd", returnValues: { agreementId: "4" } },
+    { event: "DisputeRaised", blockNumber: 37, logIndex: 0, timestamp: now - 12000, transactionHash: "0x77acbad772acb4f0e0a44e91e73e", returnValues: { agreementId: "3", raisedBy: state.account } }
+  ];
+  state.activity = [...state.allActivity];
+  buildNotifications();
   updateWalletHeader();
   showView("dashboardView");
   configureDashboardForRole();
@@ -2283,10 +2037,6 @@ function bindEvents() {
     await navigator.clipboard.writeText(state.account);
     showToast("Wallet address copied.");
   });
-  $("#profileAddress").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(state.account);
-    showToast("Wallet address copied.");
-  });
   $("#addressForm").addEventListener("submit", async event => {
     event.preventDefault();
     const address = $("#contractAddress").value.trim();
@@ -2319,17 +2069,8 @@ function bindEvents() {
       updatePriceSuggestion(false);
       renderCarriers();
     });
-    $("#" + id).addEventListener("input", () => {
-      updatePriceSuggestion(false);
-      renderCarriers();
-    });
-    $("#" + id).addEventListener("change", () => {
-      updatePriceSuggestion(false);
-      renderCarriers();
-    });
   });
-  $("#origin").addEventListener("change", function() {
-    $("#deliverySpeed").value = "";
+  $("#destination").addEventListener("change", function() {
     $("#selectedCarrier").value = "";
     $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
     updateCarrierPicker(true);
@@ -2378,13 +2119,21 @@ function bindEvents() {
     }
     const nav = event.target.closest("[data-section-target]");
     if (nav) showSection(nav.dataset.sectionTarget);
+    const notification = event.target.closest("[data-notification-id]");
+    if (notification) markNotificationRead(notification.dataset.notificationId);
     const carrier = event.target.closest("[data-select-carrier]");
     if (carrier) selectCarrier(carrier.dataset.selectCarrier);
     const agreement = event.target.closest("[data-agreement-id]");
     if (agreement) openAgreement(agreement.dataset.agreementId);
     const filter = event.target.closest("[data-filter]");
     if (filter) setAgreementStatusFilter(filter.dataset.filter);
+    const notificationFilter = event.target.closest("[data-notification-filter]");
+    if (notificationFilter) {
+      state.notificationFilter = notificationFilter.dataset.notificationFilter;
+      renderNotifications();
+    }
   });
+  $("#markAllNotificationsRead").addEventListener("click", markAllNotificationsRead);
   $("#agreementDetail").addEventListener("click", event => {
     const button = event.target.closest("[data-action]");
     if (button) handleDetailAction(button.dataset.action, Number(button.dataset.milestone));
@@ -2397,17 +2146,9 @@ function bindEvents() {
     if (event.target.name === "reason") {
       $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
     }
-    if (event.target.name === "reason") {
-      $(".other-reason")?.classList.toggle("hidden", event.target.value !== "5");
-    }
     if (event.target.matches("[data-image-file]")) updateImagePreview(event.target);
   });
   document.addEventListener("change", event => {
-    if (event.target.id === "parcelPhotoFile") {
-      addParcelPhotos(event.target);
-    } else if (event.target.matches("[data-image-file]")) {
-      updateImagePreview(event.target);
-    }
     if (event.target.id === "parcelPhotoFile") {
       addParcelPhotos(event.target);
     } else if (event.target.matches("[data-image-file]")) {
@@ -2419,11 +2160,6 @@ function bindEvents() {
     event.target.dataset.fallback = "1";
     event.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='280'%3E%3Crect width='100%25' height='100%25' fill='%23edf1ec'/%3E%3Cpath d='M180 150l42-42 34 34 26-25 52 53H160z' fill='%23b6c8bd'/%3E%3Ccircle cx='290' cy='88' r='18' fill='%23c9d6ce'/%3E%3Ctext x='240' y='220' text-anchor='middle' font-family='sans-serif' font-size='16' fill='%235c6d63'%3EPreview unavailable%3C/text%3E%3C/svg%3E";
   }, true);
-  [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => {
-    dialog.addEventListener("click", event => {
-      if (event.target === dialog) dialog.close();
-    });
-  });
   [$("#agreementDialog"), $("#actionDialog"), $("#photoLightbox")].forEach(dialog => {
     dialog.addEventListener("click", event => {
       if (event.target === dialog) dialog.close();
@@ -2447,6 +2183,9 @@ async function init() {
       state.account = accounts[0] || null;
       state.contract = null;
       state.agreements = [];
+      state.activity = [];
+      state.allActivity = [];
+      state.notifications = [];
       state.currentAgreementId = null;
       updateWalletHeader();
       if (state.account) connectWallet(false); else showView("landingView");
