@@ -3,7 +3,7 @@ const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
 const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
 const MILESTONE_TYPES = ["", "Pickup confirmed", "Departed origin", "In-transit checkpoint", "Arrived destination", "Final delivery", "Other"];
-const DISPUTE_REASONS = ["", "Milestone not completed", "Proof is insufficient", "Payment is being withheld", "Cargo damaged or lost", "Other"];
+const DISPUTE_REASONS = ["", "Milestone not completed", "Delivery evidence is unclear", "Payment is being withheld", "Cargo damaged or lost", "Other"];
 const LOCATIONS = ["", "Johor", "Kedah", "Kelantan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Sabah", "Sarawak", "Selangor", "Terengganu", "Kuala Lumpur", "Putrajaya / Labuan"];
 const ITEM_TYPES = ["", "Documents", "Electronics", "Food", "Clothing", "Fragile goods", "Other"];
 const PARCEL_SIZES = ["", "Small", "Medium", "Large", "Oversized"];
@@ -20,7 +20,7 @@ const REWARD_MIN = 1;
 const REWARD_MAX = 500;
 const CARRIER_PAGE_SIZE = 6;
 const RECENT_AGREEMENT_STATUSES = [1, 3, 4, 5, 6, 7];
-const NOTIFICATION_EVENTS = ["AgreementCreated", "AgreementAccepted", "AgreementRejected", "AgreementFunded", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "DisputeResolved"];
+const NOTIFICATION_EVENTS = ["AgreementCreated", "AgreementAccepted", "AgreementRejected", "AgreementFunded", "DeadlineExtended", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "EvidenceSubmitted", "DisputeResolved"];
 const ETH_MYR_ENDPOINT = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=myr&include_last_updated_at=true";
 
 const state = {
@@ -75,7 +75,7 @@ async function uploadToIPFS(file) {
     }
     
     try {
-        showToast('Uploading to IPFS...', 'info');
+        showToast('Uploading photo...', 'info');
         
         const formData = new FormData();
         formData.append('file', file);
@@ -109,15 +109,15 @@ async function uploadToIPFS(file) {
         console.log('Uploaded to IPFS:', cid);
         console.log('View at:', `${IPFS_GATEWAY}${cid}`);
         
-        showToast(`Uploaded: ${cid.substring(0, 16)}...`, 'success');
+        showToast('Photo uploaded successfully.', 'success');
         return cid;
         
     } catch (error) {
         console.error('IPFS upload failed:', error);
         if (error.name === 'AbortError') {
-            showToast('Upload timed out. Proceeding without photo.', 'error');
+            showToast('The photo upload took too long. You can continue without the photo or try again.', 'error');
         } else {
-            showToast('Upload failed. Proceeding without photo.', 'error');
+            showToast('The photo could not be uploaded. You can continue without it or try again.', 'error');
         }
         return null;
     }
@@ -330,19 +330,24 @@ function showView(id) {
 function showToast(message, type = "success") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
   toast.textContent = message;
   $("#toastRegion").append(toast);
-  setTimeout(() => toast.remove(), 4800);
+  setTimeout(() => toast.remove(), type === "error" ? 7000 : 4800);
 }
 
 function showValidationError(message, selector) {
   showToast(message, "error");
   const field = selector ? $(selector) : null;
   if (field) {
+    field.setAttribute("aria-invalid", "true");
     field.focus({ preventScroll: true });
     field.scrollIntoView({ behavior: "smooth", block: "center" });
     field.classList.add("input-error");
-    setTimeout(() => field.classList.remove("input-error"), 3500);
+    setTimeout(() => {
+      field.classList.remove("input-error");
+      field.removeAttribute("aria-invalid");
+    }, 7000);
   }
   return false;
 }
@@ -351,29 +356,82 @@ function readableError(error) {
   const raw = error?.message || String(error || "Unknown error");
   const revert = raw.match(/revert(?:ed)?(?: with reason string)?[\s:'"]+([^"\n]+)/i);
   if (error?.code === 4001 || /user denied|user rejected/i.test(raw)) return "You cancelled the request in MetaMask. No changes were made.";
-  if (/insufficient funds/i.test(raw)) return "This wallet does not have enough ETH for the payment and transaction fee.";
-  if (/network|connection|failed to fetch|disconnected/i.test(raw)) return "The app cannot reach the blockchain. Check that Ganache is running and MetaMask is using the Ganache network.";
+  if (/insufficient funds/i.test(raw)) return "This wallet does not have enough ETH for the payment and network fee.";
+  if (/network|connection|failed to fetch|disconnected/i.test(raw)) return "The app cannot reach the blockchain. Check your connection and make sure MetaMask is using the correct network.";
   const reason = revert ? revert[1].replace(/["'}].*$/, "").trim() : "";
   const friendly = [
     [/Already registered/i, "This wallet already has a role and cannot register again."],
+    [/Not registered/i, "Register this wallet as a shipper or carrier before continuing."],
     [/Only Shipper/i, "Only the shipper for this agreement can do this."],
     [/Only.*Carrier|agreement's carrier/i, "Only the carrier assigned to this agreement can do this."],
     [/Only arbitrator/i, "Only the arbitrator wallet can do this."],
+    [/Not a participant/i, "Only the shipper or carrier in this agreement can do this."],
+    [/Agreement does not exist/i, "This agreement could not be found. Refresh the page and try again."],
+    [/Agreement not in required status/i, "This action is not available at the current stage of the agreement."],
+    [/Selected address is not a registered Carrier/i, "The selected wallet is not registered as a carrier. Choose another carrier."],
+    [/Must fund exact total value/i, "Send the exact agreement amount shown on the page."],
     [/Deadline has passed/i, "The delivery deadline has passed. Check the refund or dispute options."],
+    [/Deadline has not passed yet/i, "A refund is available only after the delivery deadline has passed."],
+    [/New deadline must be later/i, "Choose a date later than the current delivery deadline."],
+    [/Agreement is closed/i, "This agreement is closed, so its deadline cannot be changed."],
+    [/not funded\/active|not in a payable state/i, "This action is available only after the agreement has been funded."],
+    [/inactive or finalized/i, "A dispute can be raised only for an active, funded agreement."],
+    [/not in refundable status/i, "This agreement is not ready for a refund."],
+    [/Milestone already reported/i, "This milestone has already been reported."],
+    [/Milestone already completed|Milestone already verified/i, "This milestone has already been verified and paid."],
+    [/Milestone has not been reported/i, "The carrier must report this milestone before the shipper can verify it."],
+    [/Invalid milestone index/i, "This milestone could not be found. Refresh the agreement and try again."],
     [/percentages must sum to 100/i, "Milestone payouts must add up to exactly 100%."],
+    [/At least one milestone/i, "Add at least one delivery milestone."],
+    [/Other description required/i, "Enter a short description for every milestone marked Other."],
     [/Origin and destination must differ/i, "Pickup and delivery locations must be different."],
+    [/Display name is too long/i, "Use a display name with no more than 64 characters."],
+    [/Invalid location/i, "Choose a location from the list."],
+    [/Invalid delivery type/i, "Choose at least one available delivery type."],
+    [/Invalid dispute reason/i, "Choose a dispute reason from the list."],
+    [/Other reason required/i, "Explain the dispute reason before continuing."],
+    [/Agreement is not disputed|not in Disputed status/i, "This action is available only while the agreement has an active dispute."],
+    [/Description required/i, "Enter a short description of the evidence."],
+    [/No remaining funds/i, "There is no money left in escrow to refund."],
+    [/Payout exceeds escrow balance/i, "The requested payment is higher than the money remaining in escrow."],
+    [/transfer.*failed|withdrawal failed|Payout to carrier failed/i, "The wallet transfer failed. No money was lost; please try again."],
     [/No commission/i, "There is no commission available to withdraw."],
     [/greater than zero/i, `Enter a reward from ${REWARD_MIN} to ${REWARD_MAX} points.`],
     [/exceeds maximum/i, `The maximum reward is ${REWARD_MAX} points.`]
   ];
   const match = friendly.find(([pattern]) => pattern.test(reason || raw));
   if (match) return match[1];
-  if (reason) return `The contract could not complete this action: ${reason}`;
+  if (reason) return `This action could not be completed: ${reason}`;
   console.error("Blockchain request failed:", error);
-  return "The action could not be completed. Check MetaMask, Ganache and the agreement status, then try again.";
+  return "This action could not be completed. Check MetaMask and the agreement status, then try again.";
 }
 
-function setTransactionState(visible, title = "Confirm in your wallet", message = "Waiting for transaction confirmation…") {
+function completedActionMessage(label) {
+  const messages = {
+    "Create agreement": "Agreement created. The carrier can now accept or reject it.",
+    "Accept agreement": "Agreement accepted. The shipper can now fund it.",
+    "Reject agreement": "Agreement rejected. It cannot be funded.",
+    "Fund agreement": "Agreement funded. The carrier can now report delivery progress.",
+    "Report milestone": "Milestone update sent to the shipper.",
+    "Verify milestone": "Milestone verified and payment released to the carrier.",
+    "Extend deadline": "Delivery deadline updated.",
+    "Claim refund": "Remaining money returned to the shipper.",
+    "Raise dispute": "Dispute opened. Further payments are paused.",
+    "Submit dispute evidence": "Evidence added to the dispute.",
+    "Submit evidence": "Evidence added to the dispute.",
+    "Resolve dispute for shipper": "Dispute resolved. Remaining money returned to the shipper.",
+    "Resolve dispute for carrier": "Dispute resolved. Remaining money released to the carrier.",
+    "Update display name": "Display name updated.",
+    "Update carrier profile": "Carrier profile updated.",
+    "Withdraw commission": "Commission sent to the arbitrator wallet.",
+    "Update completion reward": "Completed-delivery reward updated.",
+    "Update dispute reward": "Dispute-win reward updated."
+  };
+  if (label.startsWith("Register as ")) return `${label.replace("Register as ", "")} registration complete.`;
+  return messages[label] || `${label} completed successfully.`;
+}
+
+function setTransactionState(visible, title = "Confirm in MetaMask", message = "Review the details in MetaMask, then select Confirm.") {
   $("#transactionOverlay").classList.toggle("hidden", !visible);
   $("#transactionTitle").textContent = title;
   $("#transactionMessage").textContent = message;
@@ -381,15 +439,16 @@ function setTransactionState(visible, title = "Confirm in your wallet", message 
 
 async function sendTransaction(method, options, label) {
   if (state.demo) {
-    showToast(`${label} is disabled in preview mode.`, "error");
+    showToast("This action is unavailable in preview mode.", "error");
     return null;
   }
-  setTransactionState(true, "Open MetaMask to continue", `${label}: review the details, then press Confirm in MetaMask.`);
+  setTransactionState(true, "Confirm in MetaMask", `Review the ${label.toLowerCase()} details, then select Confirm.`);
   try {
     const receipt = await method.send({ from: state.account, ...options });
-    setTransactionState(true, "Transaction confirmed", `${label} was saved successfully.`);
+    const successMessage = completedActionMessage(label);
+    setTransactionState(true, "Saved", successMessage);
     await refreshAll();
-    showToast(`${label} completed.`);
+    showToast(successMessage);
     return receipt;
   } catch (error) {
     showToast(readableError(error), "error");
@@ -424,11 +483,11 @@ async function connectWallet(requestAccess = true) {
     return;
   }
   if (!window.ethereum) {
-    showToast("MetaMask was not detected. Install or enable the extension, then reload.", "error");
+    showToast("MetaMask is not available. Install or enable it, then reload this page.", "error");
     return;
   }
   if (typeof Web3 === "undefined") {
-    showToast("Web3 could not be loaded. Run npm install and start the app with npm run dev.", "error");
+    showToast("The app did not load correctly. Restart it with npm run dev, then refresh this page.", "error");
     return;
   }
   try {
@@ -452,7 +511,7 @@ async function initializeContract(manualAddress = null) {
   try {
     if (!state.artifact) {
       const response = await fetch("/contracts/Escrow.json", { cache: "no-store" });
-      if (!response.ok) throw new Error("Escrow artifact was not found. Compile the contracts first.");
+      if (!response.ok) throw new Error("The Escrow contract file is missing. Compile the contracts, then reload the page.");
       state.artifact = await response.json();
     }
 
@@ -461,12 +520,12 @@ async function initializeContract(manualAddress = null) {
     const deployed = state.artifact.networks?.[String(deploymentKey)]?.address || state.artifact.networks?.[String(state.chainId)]?.address;
     const address = manualAddress || savedAddress || deployed;
     if (!address || !state.web3.utils.isAddress(address) || address === ZERO_ADDRESS) {
-      showSetup("No Escrow deployment was found for the connected network.");
+      showSetup("No Escrow contract was found on this network. Run the contract migration, then reload the page.");
       return;
     }
     const code = await state.web3.eth.getCode(address);
     if (!code || code === "0x") {
-      showSetup(`There is no contract at ${shortAddress(address)} on ${networkName(state.chainId)}.`);
+      showSetup(`No contract was found at ${shortAddress(address)} on ${networkName(state.chainId)}. Check the address and MetaMask network.`);
       return;
     }
     state.contract = new state.web3.eth.Contract(state.artifact.abi, address);
@@ -492,7 +551,7 @@ function showSetup(message) {
 }
 
 async function routeConnectedUser() {
-  setTransactionState(true, "Loading your workspace", "Checking your on-chain role and agreements…");
+  setTransactionState(true, "Loading your workspace", "Checking your wallet role and agreements…");
   try {
     const [arbitrator, role] = await Promise.all([
       state.contract.methods.arbitrator().call(),
@@ -527,10 +586,10 @@ function configureDashboardForRole() {
   $("#profileAvatar").style.background = avatarColor(state.account).replace("86%", "34%");
   $("#dashboardEyebrow").textContent = `${roleLabel(state.role)} dashboard`;
   $("#dashboardGreeting").textContent = isArbitrator ? "Dispute centre" : `Welcome back, ${roleLabel(state.role).toLowerCase()}`;
-  $("#dashboardIntro").textContent = isArbitrator ? "Review frozen agreements and make a final on-chain decision." : "Here's what is happening with your delivery agreements.";
-  $("#notificationHeading").textContent = isArbitrator ? "Disputes waiting for review" : isShipper ? "Delivery updates and next actions" : "Your next actions";
+  $("#dashboardIntro").textContent = isArbitrator ? "Review disputes and decide who receives the remaining money." : "View your delivery agreements and next actions.";
+  $("#notificationHeading").textContent = isArbitrator ? "Disputes waiting for a decision" : isShipper ? "Delivery updates" : "Requests and delivery updates";
   $("#agreementSectionTitle").textContent = isArbitrator ? "Dispute centre" : "Your agreements";
-  $("#agreementSectionCopy").textContent = isArbitrator ? "Review active and resolved disputes without losing their submitted evidence." : "Open an agreement to view balance, deadline and chronological milestone history.";
+  $("#agreementSectionCopy").textContent = isArbitrator ? "Review open and decided disputes, including all submitted evidence." : "Open an agreement to view its payment, deadline and delivery history.";
   $("#allFilterButton").textContent = isArbitrator ? "All disputes" : "All";
   $("#activeFilterButton").textContent = isArbitrator ? "Active" : "Active";
   $("#closedFilterButton").textContent = isArbitrator ? "Resolved" : "Closed";
@@ -541,9 +600,9 @@ function configureDashboardForRole() {
   $$('[data-filter]').forEach(item => item.classList.toggle("active", item.dataset.filter === "all"));
 
   $("#statOneLabel").textContent = "Wallet balance";
-  $("#statOneHelp").textContent = "Connected account";
+  $("#statOneHelp").textContent = "Available in this wallet";
   $("#statTwoLabel").textContent = "Locked in escrow";
-  $("#statTwoHelp").textContent = "Total escrow balance";
+  $("#statTwoHelp").textContent = "Payment waiting to be released";
   $("#statThreeLabel").textContent = "Active agreements";
   $("#statThreeHelp").textContent = "Funded or in progress";
   $("#statFourLabel").textContent = "Completed";
@@ -551,13 +610,13 @@ function configureDashboardForRole() {
 
   if (isArbitrator) {
     $("#statOneLabel").textContent = "Open agreements";
-    $("#statOneHelp").textContent = "Created, accepted, funded or in progress";
+    $("#statOneHelp").textContent = "Not yet completed or refunded";
     $("#statTwoLabel").textContent = "Active disputes";
-    $("#statTwoHelp").textContent = "Awaiting an on-chain ruling";
+    $("#statTwoHelp").textContent = "Waiting for your decision";
     $("#statThreeLabel").textContent = "Completed agreements";
     $("#statThreeHelp").textContent = "Successfully settled";
     $("#statFourLabel").textContent = "Resolved disputes";
-    $("#statFourHelp").textContent = "Settled for shipper or carrier";
+    $("#statFourHelp").textContent = "A final decision was made";
   }
 }
 
@@ -631,8 +690,8 @@ function renderCapabilityNotice() {
   if (state.role !== ROLE.ARBITRATOR) return;
   const missing = ["acceptAgreement", "rejectAgreement", "extendDeadline", "withdrawCommission", "setCompletionReward", "setDisputeWinReward"].filter(name => !supportsMethod(name));
   $("#backendCapabilityText").textContent = missing.length
-    ? `This deployment supports shipment details, carrier profiles, reputation and disputes. Acceptance, rejection, deadline extension, commission withdrawal and reward settings require the planned Solidity update.`
-    : "All planned frontend integration methods are present in this deployment.";
+    ? "Some features are unavailable because this contract version is out of date. Deploy the latest contracts to enable every action."
+    : "All features are available with this contract.";
 }
 
 async function refreshArbitratorControls() {
@@ -848,7 +907,7 @@ function renderRecentAgreements() {
   const container = $("#recentAgreementList");
   const recent = (state.role === ROLE.ARBITRATOR ? state.agreements.filter(agreement => agreement.disputeReason > 0) : state.agreements.filter(agreement => RECENT_AGREEMENT_STATUSES.includes(agreement.status))).slice(0, 4);
   if (!recent.length) {
-    container.innerHTML = `<div class="empty-state"><strong>No accepted agreements yet</strong>${state.role === ROLE.SHIPPER ? "An agreement will appear here after its carrier accepts it." : state.role === ROLE.CARRIER ? "Accepted agreements will appear here. Check Notifications for new offers." : "Resolved and active disputes will appear here."}</div>`;
+    container.innerHTML = `<div class="empty-state"><strong>No accepted agreements yet</strong>${state.role === ROLE.SHIPPER ? "Accepted delivery requests will appear here." : state.role === ROLE.CARRIER ? "Accepted work will appear here. Check Notifications for new requests." : "Active and resolved disputes will appear here."}</div>`;
     return;
   }
   container.innerHTML = recent.map(agreement => {
@@ -883,26 +942,29 @@ function notificationCopy(event, agreement) {
   const lastVerifiedEvent = state.allActivity.find(item => item.event === "MilestoneVerified" && String(item.returnValues?.agreementId) === String(agreement.id));
   const completesAgreement = agreement.status === 5 && lastVerifiedEvent === event;
   const copies = {
-    AgreementCreated: { level: "attention", title: `New Agreement #${agreement.id} needs your response`, message: "Review the delivery details, then accept or reject the offer." },
-    AgreementAccepted: { level: "success", title: `Carrier accepted Agreement #${agreement.id}`, message: "The agreement is ready for the shipper to fund." },
-    AgreementRejected: { level: "danger", title: `Carrier rejected Agreement #${agreement.id}`, message: "This agreement cannot be funded. Choose another carrier for a new agreement." },
-    AgreementFunded: { level: "success", title: `Agreement #${agreement.id} has been funded`, message: `${amount ? `${formatEth(amount)} is locked in escrow. ` : ""}The carrier can start reporting milestones.` },
-    MilestoneReported: { level: "attention", title: `${milestoneLabel} was reported`, message: `Open Agreement #${agreement.id} to review the carrier's update.` },
+    AgreementCreated: { level: "attention", title: `New delivery request: Agreement #${agreement.id}`, message: "Review the delivery details, then accept or reject it." },
+    AgreementAccepted: { level: "success", title: `Agreement #${agreement.id} accepted`, message: "The carrier accepted your request. You can now add the payment to escrow." },
+    AgreementRejected: { level: "danger", title: `Agreement #${agreement.id} rejected`, message: "The carrier declined your request. Create a new agreement with another carrier." },
+    AgreementFunded: { level: "success", title: `Payment received for Agreement #${agreement.id}`, message: `${amount ? `${formatEth(amount)} is now held safely. ` : "The payment is now held safely. "}You can begin the delivery.` },
+    DeadlineExtended: { level: "attention", title: `Deadline changed for Agreement #${agreement.id}`, message: `The shipper changed the delivery deadline to ${formatDate(event.returnValues?.newDeadline)}.` },
+    MilestoneReported: { level: "attention", title: `New delivery update: ${milestoneLabel}`, message: `The carrier updated Agreement #${agreement.id}. Review the update before releasing payment.` },
     MilestoneVerified: completesAgreement
-      ? { level: "success", title: `Agreement #${agreement.id} is completed`, message: `${milestoneLabel} was verified${amount ? ` and ${formatEth(amount)} was released` : ""}.` }
-      : { level: "success", title: `${milestoneLabel} was verified`, message: `${amount ? `${formatEth(amount)} was released to the carrier.` : "The milestone payout was released to the carrier."}` },
-    AgreementRefunded: { level: "success", title: `Refund received for Agreement #${agreement.id}`, message: `${amount ? `${formatEth(amount)} was returned` : "The remaining escrow was returned"} to the shipper wallet.` },
-    DisputeRaised: { level: "danger", title: `Dispute opened for Agreement #${agreement.id}`, message: "Payments are paused while the arbitrator reviews the case." },
-    DisputeResolved: { level: "success", title: `Dispute resolved for Agreement #${agreement.id}`, message: event.returnValues?.resolution ? `Decision: ${event.returnValues.resolution}.` : "The arbitrator recorded a final decision." }
+      ? { level: "success", title: `Agreement #${agreement.id} completed`, message: `${milestoneLabel} was approved. All delivery milestones are now complete.` }
+      : { level: "success", title: `${milestoneLabel} approved`, message: `${amount ? `${formatEth(amount)} was paid to the carrier.` : "The milestone payment was sent to the carrier."}` },
+    AgreementRefunded: { level: "success", title: `Refund sent for Agreement #${agreement.id}`, message: `${amount ? `${formatEth(amount)} was returned` : "The remaining money was returned"} to the shipper.` },
+    DisputeRaised: { level: "danger", title: `Dispute opened for Agreement #${agreement.id}`, message: "Payments are paused until the arbitrator makes a decision." },
+    EvidenceSubmitted: { level: "attention", title: `New dispute evidence for Agreement #${agreement.id}`, message: "New information was added to the dispute. Open the agreement to review it." },
+    DisputeResolved: { level: "success", title: `Dispute decided for Agreement #${agreement.id}`, message: /shipper/i.test(event.returnValues?.resolution || "") ? "The remaining money was returned to the shipper." : /carrier/i.test(event.returnValues?.resolution || "") ? "The remaining money was released to the carrier." : "The arbitrator has made a final decision." }
   };
   return copies[event.event];
 }
 
 function notificationApplies(event, agreement) {
   if (!NOTIFICATION_EVENTS.includes(event.event)) return false;
-  if (state.role === ROLE.ARBITRATOR) return event.event === "DisputeRaised";
-  if (state.role === ROLE.SHIPPER) return ["AgreementAccepted", "AgreementRejected", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "DisputeResolved"].includes(event.event);
-  if (state.role === ROLE.CARRIER) return ["AgreementCreated", "AgreementFunded", "MilestoneVerified", "DisputeRaised", "DisputeResolved"].includes(event.event);
+  if (event.event === "EvidenceSubmitted" && String(event.returnValues?.submittedBy || "").toLowerCase() === String(state.account || "").toLowerCase()) return false;
+  if (state.role === ROLE.ARBITRATOR) return ["DisputeRaised", "EvidenceSubmitted"].includes(event.event);
+  if (state.role === ROLE.SHIPPER) return ["AgreementAccepted", "AgreementRejected", "MilestoneReported", "MilestoneVerified", "AgreementRefunded", "DisputeRaised", "EvidenceSubmitted", "DisputeResolved"].includes(event.event);
+  if (state.role === ROLE.CARRIER) return ["AgreementCreated", "AgreementFunded", "DeadlineExtended", "MilestoneVerified", "DisputeRaised", "EvidenceSubmitted", "DisputeResolved"].includes(event.event);
   return false;
 }
 
@@ -934,7 +996,7 @@ function markAllNotificationsRead() {
   state.notifications.forEach(item => { item.read = true; readIds.add(item.id); });
   saveReadNotificationIds(readIds);
   renderNotifications();
-  showToast("All notifications have been marked as read.");
+  showToast("All messages marked as read.");
 }
 
 function notificationMarkup(item, compact = false) {
@@ -954,13 +1016,14 @@ function renderNotifications() {
   if (navCount) { navCount.textContent = String(unread.length); navCount.classList.toggle("hidden", unread.length === 0); }
   const unreadCount = $("#unreadNotificationCount");
   if (unreadCount) unreadCount.textContent = String(unread.length);
-  const emptyMessage = state.role === ROLE.CARRIER ? "New offers, funding, payouts and dispute decisions will appear here." : state.role === ROLE.SHIPPER ? "Carrier responses, milestone reports, refunds and dispute decisions will appear here." : "New disputes will appear here when they need review.";
+  const emptyMessage = state.role === ROLE.CARRIER ? "New delivery requests, payments and decisions will appear here." : state.role === ROLE.SHIPPER ? "Carrier replies, delivery updates, refunds and decisions will appear here." : "New disputes will appear here for review.";
   container.innerHTML = unread.length ? unread.slice(0, 4).map(item => notificationMarkup(item, true)).join("") + (unread.length > 4 ? `<button class="text-button notification-view-all" type="button" data-section-target="notificationsSection">View all ${unread.length} unread messages →</button>` : "") : `<div class="empty-state compact"><strong>No unread notifications</strong>${escapeHtml(emptyMessage)}</div>`;
 
   const centre = $("#notificationCentreList");
   if (!centre) return;
   const filtered = state.notificationFilter === "all" ? state.notifications : state.notifications.filter(item => state.notificationFilter === "read" ? item.read : !item.read);
-  centre.innerHTML = filtered.length ? filtered.map(item => notificationMarkup(item)).join("") : `<div class="empty-state"><strong>No ${escapeHtml(state.notificationFilter)} notifications</strong>Messages will remain here after you read them.</div>`;
+  const emptyHeading = state.notificationFilter === "unread" ? "No unread messages" : state.notificationFilter === "read" ? "No read messages" : "No messages yet";
+  centre.innerHTML = filtered.length ? filtered.map(item => notificationMarkup(item)).join("") : `<div class="empty-state"><strong>${emptyHeading}</strong>Your agreement updates will appear here.</div>`;
   $$('[data-notification-filter]').forEach(button => button.classList.toggle("active", button.dataset.notificationFilter === state.notificationFilter));
   const markAll = $("#markAllNotificationsRead");
   if (markAll) markAll.disabled = unread.length === 0;
@@ -995,7 +1058,7 @@ function renderAgreementGrid() {
   });
   renderAgreementFilterState(agreements.length);
   if (!agreements.length) {
-    container.innerHTML = `<div class="empty-state"><strong>Nothing to show</strong>No agreements match this filter.</div>`;
+    container.innerHTML = `<div class="empty-state"><strong>No matching agreements</strong>Change or clear the filters to see more agreements.</div>`;
     return;
   }
   container.innerHTML = agreements.map(agreement => {
@@ -1020,8 +1083,8 @@ function renderCarriers() {
     if (!quick || !picker || !marketplace) return;
     
     if (!state.carriers.length) {
-        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered</strong>Connect another wallet and register it as a carrier.</div>`;
-        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>A carrier must register on-chain first.</div>`;
+        quick.innerHTML = `<div class="empty-state"><strong>No carriers registered yet</strong>A carrier must register before a shipper can create an agreement.</div>`;
+        picker.innerHTML = `<div class="empty-state"><strong>No carriers available</strong>Ask a carrier to register and complete their service profile.</div>`;
         marketplace.innerHTML = picker.innerHTML;
         return;
     }
@@ -1084,7 +1147,7 @@ function updateCarrierPicker(resetPage = false) {
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = "Enter the shipment details first.";
+        if (summary) summary.textContent = "Choose a destination and delivery type first.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1184,37 +1247,37 @@ function selectCarrier(address) {
     if (!createPageIsOpen) showSection("createSection");
     if (alreadySelected) return;
     const carrier = state.carriers.find(item => item.address.toLowerCase() === address.toLowerCase());
-    showToast(`${carrier?.name || "Carrier"} has been selected for this agreement.`);
+    showToast(`${carrier?.name || "Carrier"} selected.`);
 }
 
 function renderMarketplace() {
   const query = ($("#carrierSearch")?.value || "").trim().toLowerCase(); const locationValue = Number($("#carrierLocationFilter")?.value || 0); const speed = Number($("#carrierSpeedFilter")?.value || 0);
   let carriers = state.carriers.filter(carrier => (!query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)) && (!locationValue || carrier.profile?.location === locationValue) && (!speed || (carrier.profile?.deliveryTypes & speed)));
   carriers.sort((a, b) => $("#carrierSort")?.value === "reputation" ? Number(b.reputation) - Number(a.reputation) : a.name.localeCompare(b.name));
-  $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Try removing one of the marketplace filters.</div>`;
+  $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Change or clear the filters to see more carriers.</div>`;
 }
 function renderActivity() {
   const labels = { 
-    AgreementCreated: "Agreement created", 
+    AgreementCreated: "Delivery agreement created", 
     AgreementAccepted: "Agreement accepted", 
     AgreementRejected: "Agreement rejected", 
-    AgreementFunded: "Escrow funded", 
-    DeadlineExtended: "Deadline extended", 
-    MilestoneReported: "Milestone reported", 
-    MilestoneVerified: "Milestone verified", 
-    AgreementRefunded: "Shipper refunded", 
+    AgreementFunded: "Payment added to escrow", 
+    DeadlineExtended: "Delivery deadline changed", 
+    MilestoneReported: "Delivery update reported", 
+    MilestoneVerified: "Milestone approved and paid", 
+    AgreementRefunded: "Refund sent to shipper", 
     DisputeRaised: "Dispute raised", 
-    DisputeResolved: "Dispute resolved", 
+    DisputeResolved: "Dispute decided", 
     EvidenceSubmitted: "Evidence submitted", 
-    CommissionCollected: "Commission collected", 
-    CommissionWithdrawn: "Commission withdrawn", 
-    ReputationRewardsUpdated: "Reputation rewards updated", 
-    CarrierProfileUpdated: "Carrier profile updated", 
+    CommissionCollected: "Service fee collected", 
+    CommissionWithdrawn: "Service fee sent to arbitrator", 
+    ReputationRewardsUpdated: "Carrier reward settings changed", 
+    CarrierProfileUpdated: "Carrier services updated", 
     DisplayNameUpdated: "Display name updated" 
   };
   
   if (!state.activity.length) {
-    $("#activityFeed").innerHTML = `<div class="empty-state"><strong>No accepted-agreement activity yet</strong>Updates will appear after a carrier accepts an agreement.</div>`;
+    $("#activityFeed").innerHTML = `<div class="empty-state"><strong>No activity yet</strong>Updates will appear after a carrier accepts an agreement.</div>`;
     return;
   }
   
@@ -1276,7 +1339,7 @@ function suggestedPrice() {
 
 function updatePriceSuggestion(fillIfEmpty = false) {
   const estimate = suggestedPrice().toFixed(6);
-  $("#priceSuggestion").textContent = `Suggested ${estimate} ETH. You may change this amount before creating the agreement.`;
+  $("#priceSuggestion").textContent = `Suggested amount: ${estimate} ETH. You can change it.`;
   if (fillIfEmpty && !$("#totalValue").value) $("#totalValue").value = estimate;
   updateMyrEstimate();
 }
@@ -1331,17 +1394,17 @@ async function createAgreement(event) {
 
     let photoCID = "";
     if (state.parcelPhotos.length > 0) {
-        setTransactionState(true, "Uploading parcel photo to IPFS", "This may take a few seconds...");
+        setTransactionState(true, "Uploading parcel photo", "Please wait while the photo is uploaded.");
         try {
             const file = state.parcelPhotos[0].file;
             photoCID = (await uploadToIPFS(file)) || "";
             if (photoCID) {
                 console.log('Parcel photo uploaded:', photoCID);
-                showToast(`Parcel photo uploaded: ${photoCID.substring(0, 12)}...`, 'success');
+                showToast('Parcel photo uploaded.', 'success');
             }
         } catch (error) {
             console.error('Photo upload failed:', error);
-            showToast('Photo upload failed. Proceeding without photo.', 'error');
+            showToast('The parcel photo could not be uploaded. The agreement will be created without it.', 'error');
             photoCID = "";
         } finally {
             setTransactionState(false);
@@ -1412,7 +1475,7 @@ function milestoneName(milestone) {
 function cidLink(cid) {
   if (!cid) return "";
   const url = imageUrl(cid);
-  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View proof ↗</a>` : `<span>${escapeHtml(cid)}</span>`;
+  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View photo or file ↗</a>` : `<span>Attachment unavailable</span>`;
 }
 
 function imageUrl(value) {
@@ -1443,7 +1506,7 @@ function updateImagePreview(input) {
     const file = input.files?.[0];
     if (!file) return;
     preview.src = URL.createObjectURL(file); wrap.classList.remove("hidden");
-    caption.textContent = `${file.name} — selected for this form.`;
+    caption.textContent = `${file.name} selected.`;
     return;
   }
 }
@@ -1519,8 +1582,8 @@ function milestoneButtons(agreement, milestone) {
 function timelineEvents(agreement) {
   const events = [];
   agreement.milestones.forEach(milestone => {
-    if (milestone.reportedTimestamp) events.push({ timestamp: milestone.reportedTimestamp, title: `${milestoneName(milestone)} reported`, note: milestone.proofCID ? `Proof CID: ${milestone.proofCID}` : "No proof CID attached" });
-    if (milestone.completedTimestamp) events.push({ timestamp: milestone.completedTimestamp, title: `${milestoneName(milestone)} verified`, note: `${milestone.percentage}% payout released` });
+    if (milestone.reportedTimestamp) events.push({ timestamp: milestone.reportedTimestamp, title: `${milestoneName(milestone)} reported`, note: milestone.proofCID ? "Delivery photo attached" : "No delivery photo attached" });
+    if (milestone.completedTimestamp) events.push({ timestamp: milestone.completedTimestamp, title: `${milestoneName(milestone)} approved`, note: `${milestone.percentage}% payment released` });
   });
   return events.sort((a, b) => b.timestamp - a.timestamp);
 }
@@ -1547,11 +1610,11 @@ function renderAgreementDetail(agreement) {
   
   $("#agreementDetail").innerHTML = `
     <div class="detail-head">
-      <span class="section-label">On-chain agreement</span>
+      <span class="section-label">Agreement details</span>
       <div class="detail-title-row">
         <div>
           <h2>Agreement #${agreement.id}</h2>
-          <p>Review the people, payment and delivery progress for this agreement.</p>
+          <p>View the shipper, carrier, payment and delivery progress.</p>
         </div>
         ${statusPill(agreement.status)}
       </div>
@@ -1564,16 +1627,16 @@ function renderAgreementDetail(agreement) {
       </div>
       <div class="detail-stats">
         <div class="detail-stat">
-          <span>Total value</span>
+            <span>Agreement amount</span>
           <strong>${formatEth(agreement.totalValue)}</strong>
           <small>${formatMyrFromWei(agreement.totalValue)}</small>
         </div>
         <div class="detail-stat">
-          <span>Released</span>
+            <span>Paid to carrier</span>
           <strong>${formatEth(agreement.releasedAmount)}</strong>
         </div>
         <div class="detail-stat">
-          <span>Current escrow</span>
+            <span>Still in escrow</span>
           <strong>${formatEth(escrowRemaining(agreement))}</strong>
         </div>
         <div class="detail-stat">
@@ -1630,9 +1693,9 @@ function renderAgreementDetail(agreement) {
             <div class="milestone-copy">
               <h4>${escapeHtml(milestoneName(milestone))}</h4>
               <div class="milestone-history">
-                ${milestone.reportedTimestamp ? `<span><b>Carrier reported progress</b>${formatDate(milestone.reportedTimestamp)}</span>` : `<span class="pending"><b>Waiting for carrier update</b>The carrier has not reported this milestone yet.</span>`}
-                ${milestone.completedTimestamp ? `<span><b>Shipper verified milestone</b>${formatDate(milestone.completedTimestamp)} · ${milestone.percentage}% of the agreement value released</span>` : milestone.reported ? `<span class="pending"><b>Waiting for shipper verification</b>The shipper needs to review this milestone before payment is released.</span>` : ""}
-                ${milestone.proofCID ? `<span><b>Photo evidence</b>${cidLink(milestone.proofCID)}</span>` : ""}
+                ${milestone.reportedTimestamp ? `<span><b>Carrier sent an update</b>${formatDate(milestone.reportedTimestamp)}</span>` : `<span class="pending"><b>Waiting for carrier</b>No update has been sent for this milestone.</span>`}
+                ${milestone.completedTimestamp ? `<span><b>Shipper approved this milestone</b>${formatDate(milestone.completedTimestamp)} · ${milestone.percentage}% of the agreement amount paid</span>` : milestone.reported ? `<span class="pending"><b>Waiting for shipper</b>The shipper must review this update before payment is released.</span>` : ""}
+                ${milestone.proofCID ? `<span><b>Delivery photo</b>${cidLink(milestone.proofCID)}</span>` : ""}
               </div>
               ${milestone.proofCID ? imageProof(milestone.proofCID, `${milestoneName(milestone)} delivery proof`, "View milestone photo") : ""}
             </div>
@@ -1687,7 +1750,7 @@ function renderAgreementDetail(agreement) {
         
         <!-- Accepted (1): Carrier waits -->
         ${agreement.status === 1 && state.role === ROLE.CARRIER ? `
-          <span class="action-note">Accepted. Waiting for the shipper to fund the escrow.</span>
+          <span class="action-note">Accepted. Waiting for the shipper to add the payment.</span>
         ` : ""}
         
         <!-- Rejected (2) -->
@@ -1737,24 +1800,24 @@ function openActionDialog(action, milestoneIndex = null) {
   submit.textContent = "Confirm";
   if (action === "report") {
     title.textContent = "Report milestone";
-    description.textContent = "Record delivery progress and optionally choose a proof photo for preview.";
-    fields.innerHTML = imageInputMarkup("proofCID", "Milestone delivery photo (optional)", "Photograph the parcel, checkpoint, receiver, or delivery document.");
-    submit.textContent = "Report on-chain";
+    description.textContent = "Send a delivery update to the shipper. You may also add a photo.";
+    fields.innerHTML = imageInputMarkup("proofCID", "Delivery photo (optional)", "Add a photo of the parcel, checkpoint, receiver or delivery document.");
+    submit.textContent = "Send update";
   } else if (action === "extend") {
     const agreement = state.agreements.find(item => item.id === state.currentAgreementId);
     const minimum = new Date(Math.max(Date.now() + 60000, (agreement?.deadline + 60) * 1000));
     minimum.setMinutes(minimum.getMinutes() - minimum.getTimezoneOffset());
     title.textContent = "Extend delivery deadline";
-    description.textContent = "Choose a new deadline later than both the current deadline and the present time.";
+    description.textContent = "Choose a date and time later than the current deadline.";
     fields.innerHTML = `<label>New deadline<input name="newDeadline" type="datetime-local" min="${minimum.toISOString().slice(0, 16)}" value="${minimum.toISOString().slice(0, 16)}" required></label>`;
     submit.textContent = "Extend deadline";
   } else if (action === "dispute") {
     title.textContent = "Raise a dispute";
-    description.textContent = "Raising a dispute freezes payouts. Optional evidence is submitted in a second wallet transaction after the dispute opens.";
-    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Proof is insufficient</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Choose a supporting photo to preview before submitting.")}`;
+    description.textContent = "Opening a dispute pauses all payments. If you add evidence, MetaMask will ask you to confirm twice.";
+    fields.innerHTML = `<label>Reason<select name="reason" required><option value="1">Milestone not completed</option><option value="2">Delivery evidence is unclear</option><option value="3">Payment is being withheld</option><option value="4">Cargo damaged or lost</option><option value="5">Other</option></select></label><label class="other-reason hidden">Other reason<textarea name="otherReason" placeholder="Explain the issue"></textarea></label><label>Evidence description (optional)<textarea name="evidenceDescription" placeholder="Describe the damage, missing item, or delivery issue"></textarea></label>${imageInputMarkup("evidenceCID", "Dispute evidence photo (optional)", "Choose a supporting photo to preview before submitting.")}`;
   } else if (action === "evidence") {
     title.textContent = "Submit dispute evidence";
-    description.textContent = "Evidence is permanently associated with this disputed agreement.";
+    description.textContent = "Add information or a photo to help the arbitrator make a decision.";
     fields.innerHTML = `<label>Description<textarea name="description" required placeholder="Explain what this evidence shows"></textarea></label>${imageInputMarkup("fileCID", "Evidence photo or document (optional)", "Choose a supporting photo to preview before submitting.")}`;
     submit.textContent = "Submit evidence";
   }
@@ -1765,15 +1828,15 @@ async function handleDetailAction(action, milestoneIndex) {
   const agreement = state.agreements.find(item => item.id === state.currentAgreementId);
   if (!agreement) return;
   if (["report", "dispute", "evidence", "extend"].includes(action)) return openActionDialog(action, milestoneIndex);
-  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
   try {
-    if (action === "accept" && confirm("Accept this delivery agreement? The shipper will then be able to fund it.")) await sendTransaction(state.contract.methods.acceptAgreement(agreement.id), {}, "Accept agreement");
-    if (action === "reject" && confirm("Reject this delivery agreement? It cannot be funded afterwards.")) await sendTransaction(state.contract.methods.rejectAgreement(agreement.id), {}, "Reject agreement");
+    if (action === "accept" && confirm("Accept this delivery request? The shipper will then be able to add the payment.")) await sendTransaction(state.contract.methods.acceptAgreement(agreement.id), {}, "Accept agreement");
+    if (action === "reject" && confirm("Reject this delivery request? This agreement will close and cannot be funded.")) await sendTransaction(state.contract.methods.rejectAgreement(agreement.id), {}, "Reject agreement");
     if (action === "fund") await sendTransaction(state.contract.methods.fundAgreement(agreement.id), { value: agreement.totalValue }, "Fund agreement");
-    if (action === "verify" && confirm("Verify this milestone and release its payout to the carrier?")) await sendTransaction(state.contract.methods.verifyMilestone(agreement.id, milestoneIndex), {}, "Verify milestone");
-    if (action === "refund" && confirm("Claim the remaining escrow balance for the shipper?")) await sendTransaction(state.contract.methods.checkAndRefund(agreement.id), {}, "Claim refund");
-    if (action === "resolve-shipper" && confirm("Final decision: refund all remaining escrow to the shipper? This cannot be undone.")) await sendTransaction(state.contract.methods.resolveDispute(agreement.id, true), {}, "Resolve dispute for shipper");
-    if (action === "resolve-carrier" && confirm("Final decision: release all remaining escrow to the carrier? This cannot be undone.")) await sendTransaction(state.contract.methods.resolveDispute(agreement.id, false), {}, "Resolve dispute for carrier");
+    if (action === "verify" && confirm("Approve this milestone and pay the carrier? This cannot be undone.")) await sendTransaction(state.contract.methods.verifyMilestone(agreement.id, milestoneIndex), {}, "Verify milestone");
+    if (action === "refund" && confirm("Return all money still in escrow to the shipper?")) await sendTransaction(state.contract.methods.checkAndRefund(agreement.id), {}, "Claim refund");
+    if (action === "resolve-shipper" && confirm("Return all remaining money to the shipper? This decision cannot be undone.")) await sendTransaction(state.contract.methods.resolveDispute(agreement.id, true), {}, "Resolve dispute for shipper");
+    if (action === "resolve-carrier" && confirm("Pay all remaining money to the carrier? This decision cannot be undone.")) await sendTransaction(state.contract.methods.resolveDispute(agreement.id, false), {}, "Resolve dispute for carrier");
   } catch (_) { /* already surfaced */ }
 }
 
@@ -1784,7 +1847,7 @@ async function submitAction(event) {
     
     if (state.demo) {
         $("#actionDialog").close();
-        return showToast("Transactions are disabled in preview mode.", "error");
+        return showToast("This action is unavailable in preview mode.", "error");
     }
     
     try {
@@ -1794,16 +1857,16 @@ async function submitAction(event) {
             const fileInput = document.querySelector('[name="proofCID"]');
 
             if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading proof to IPFS", "Uploading milestone proof photo...");
+                setTransactionState(true, "Uploading delivery photo", "Please wait while the photo is uploaded.");
                 try {
                     proofCID = (await uploadToIPFS(fileInput.files[0])) || "";
                     if (proofCID) {
                         console.log('Milestone proof uploaded:', proofCID);
-                        showToast(`Proof uploaded: ${proofCID.substring(0, 12)}...`, 'success');
+                        showToast('Delivery photo uploaded.', 'success');
                     }
                 } catch (error) {
                     console.error('Proof upload failed:', error);
-                    showToast('Proof photo upload failed. Proceeding without photo.', 'error');
+                    showToast('The delivery photo could not be uploaded. You can send the update without it.', 'error');
                     proofCID = "";
                 } finally {
                     setTransactionState(false);
@@ -1839,16 +1902,16 @@ async function submitAction(event) {
             const evidenceFileInput = document.querySelector('[name="evidenceCID"]');
             
             if (evidenceFileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to IPFS", "Uploading dispute evidence photo...");
+                setTransactionState(true, "Uploading evidence photo", "Please wait while the photo is uploaded.");
                 try {
                     evidenceCID = (await uploadToIPFS(evidenceFileInput.files[0])) || "";
                     if (evidenceCID) {
                         console.log('Evidence uploaded:', evidenceCID);
-                        showToast(`Evidence uploaded: ${evidenceCID.substring(0, 12)}...`, 'success');
+                        showToast('Evidence photo uploaded.', 'success');
                     }
                 } catch (error) {
                     console.error('Evidence upload failed:', error);
-                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    showToast('The evidence photo could not be uploaded. You can continue without it.', 'error');
                     evidenceCID = "";
                 } finally {
                     setTransactionState(false);
@@ -1856,7 +1919,7 @@ async function submitAction(event) {
             }
             
             if (reason === 5 && !otherReason) {
-                return showToast("Enter the other dispute reason.", "error");
+                return showToast("Explain the dispute reason before continuing.", "error");
             }
             
             await sendTransaction(
@@ -1881,23 +1944,23 @@ async function submitAction(event) {
         if (action === "evidence") {
             const description = String(data.get("description") || "").trim();
             if (!description) {
-                return showToast("Evidence description is required.", "error");
+                return showToast("Briefly explain what the evidence shows.", "error");
             }
             
             let fileCID = "";
             const fileInput = document.querySelector('[name="fileCID"]');
 
             if (fileInput?.files?.length > 0) {
-                setTransactionState(true, "Uploading evidence to IPFS", "Uploading evidence photo...");
+                setTransactionState(true, "Uploading evidence photo", "Please wait while the photo is uploaded.");
                 try {
                     fileCID = (await uploadToIPFS(fileInput.files[0])) || "";
                     if (fileCID) {
                         console.log('Evidence uploaded:', fileCID);
-                        showToast(`Evidence uploaded: ${fileCID.substring(0, 12)}...`, 'success');
+                        showToast('Evidence photo uploaded.', 'success');
                     }
                 } catch (error) {
                     console.error('Evidence upload failed:', error);
-                    showToast('Evidence photo upload failed. Proceeding without photo.', 'error');
+                    showToast('The evidence photo could not be uploaded. You can continue without it.', 'error');
                     fileCID = "";
                 } finally {
                     setTransactionState(false);
@@ -1920,7 +1983,7 @@ async function submitAction(event) {
 
 async function registerRole(role) {
   const label = roleLabel(Number(role));
-  if (!confirm(`Register this wallet permanently as ${label}? The role cannot be changed later.`)) return;
+  if (!confirm(`Register this wallet as ${label}? You cannot change this role later.`)) return;
   try {
     await sendTransaction(state.contract.methods.registerUser(Number(role)), {}, `Register as ${label}`);
     await routeConnectedUser();
@@ -1993,7 +2056,7 @@ function populateLocationSelects() {
 async function saveDisplayName(event) {
   event.preventDefault();
   const name = $("#displayNameInput").value.trim();
-  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
   try { await sendTransaction(state.contract.methods.setDisplayName(name), {}, "Update display name"); } catch (_) { /* surfaced */ }
 }
 
@@ -2002,12 +2065,12 @@ async function saveCarrierProfile(event) {
   const locationValue = Number($("#profileLocation").value);
   const mask = $$('[name="deliveryType"]:checked').reduce((sum, input) => sum + Number(input.value), 0);
   if (!mask) return showToast("Select at least one delivery type.", "error");
-  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
   try { await sendTransaction(state.contract.methods.setCarrierProfile(locationValue, mask), {}, "Update carrier profile"); } catch (_) { /* surfaced */ }
 }
 
 async function withdrawCommission() {
-  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
   if (BigInt(state.arbitratorEarnings || 0) === 0n) return showToast("There is no commission available to withdraw.", "error");
   if (!confirm(`Withdraw ${formatEth(state.arbitratorEarnings)} to the arbitrator wallet?`)) return;
   try { await sendTransaction(state.contract.methods.withdrawCommission(), {}, "Withdraw commission"); } catch (_) { /* surfaced */ }
@@ -2019,7 +2082,7 @@ async function saveRewardSettings(event) {
   const dispute = Number($("#disputeRewardInput").value);
   if (!Number.isInteger(completion) || completion < REWARD_MIN || completion > REWARD_MAX) return showValidationError(`Completed-delivery reward must be a whole number from ${REWARD_MIN} to ${REWARD_MAX}.`, "#completionRewardInput");
   if (!Number.isInteger(dispute) || dispute < REWARD_MIN || dispute > REWARD_MAX) return showValidationError(`Carrier dispute-win reward must be a whole number from ${REWARD_MIN} to ${REWARD_MAX}.`, "#disputeRewardInput");
-  if (state.demo) return showToast("Transactions are disabled in preview mode.", "error");
+  if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
   const updateCompletion = String(completion) !== String(state.completionReward);
   const updateDispute = String(dispute) !== String(state.disputeWinReward);
   try {
@@ -2040,7 +2103,7 @@ function bindEvents() {
   $("#addressForm").addEventListener("submit", async event => {
     event.preventDefault();
     const address = $("#contractAddress").value.trim();
-    if (!state.web3?.utils.isAddress(address)) return showToast("Enter a valid Ethereum address.", "error");
+    if (!state.web3?.utils.isAddress(address)) return showToast("Enter a valid wallet address starting with 0x.", "error");
     await initializeContract(address);
   });
   $$('[data-register-role]').forEach(button => button.addEventListener("click", () => registerRole(button.dataset.registerRole)));

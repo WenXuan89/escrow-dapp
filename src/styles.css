@@ -911,7 +911,7 @@ label {
 
 .panel-copy {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -919,7 +919,7 @@ label {
   border: 0;
   background: none;
   color: var(--green-2);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -1792,7 +1792,9 @@ dialog::backdrop {
   padding: 15px 18px;
   border-radius: 12px;
   box-shadow: 0 18px 42px rgba(20, 35, 30, .25);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
   text-align: center;
   animation: toast-in .25s ease;
 }
@@ -2644,8 +2646,8 @@ dialog::backdrop {
 .notification-item strong,
 .notification-item small { display: block; }
 .notification-item strong { margin-bottom: .25rem; }
-.notification-item small { color: var(--muted, #6f7b73); line-height: 1.45; }
-.notification-item time { display: block; margin-top: .45rem; color: var(--muted, #6f7b73); font-size: .75rem; }
+.notification-item small { color: var(--muted, #6f7b73); font-size: .875rem; line-height: 1.45; }
+.notification-item time { display: block; margin-top: .45rem; color: var(--muted, #6f7b73); font-size: .8rem; }
 .notification-dot { width: .7rem; height: .7rem; border-radius: 50%; background: #358364; }
 .notification-item.attention .notification-dot { background: #c6852d; }
 .notification-item.danger .notification-dot { background: #b75050; }
@@ -2767,7 +2769,7 @@ dialog::backdrop {
 .milestone-history b { display: block; color: var(--ink, #17231e); }
 .milestone-history .pending { border-color: #d6ddd8; }
 
-.fieldset-help { display: block; flex: 0 0 100%; width: 100%; margin-top: .25rem; color: var(--muted, #6f7b73); line-height: 1.45; }
+.fieldset-help { display: block; flex: 0 0 100%; width: 100%; margin-top: .25rem; color: var(--muted, #6f7b73); font-size: .875rem; line-height: 1.45; }
 .input-error { outline: 3px solid rgba(183, 80, 80, .24) !important; border-color: #b75050 !important; }
 .empty-state.compact { min-height: auto; padding: 1rem; }
 

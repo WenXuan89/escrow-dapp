@@ -102,7 +102,8 @@ ERC20-compatible reputation token:
 3. Create .env file for Sepolia deployment (optional):
    ```bash
    MNEMONIC="your twelve word mnemonic here"
-   INFURA_KEY="your_infura_api_key_here"ALCHEMY_KEY="your_alchemy_api_key_here"    # Optional
+   INFURA_KEY="your_infura_api_key_here"
+   ALCHEMY_KEY="your_alchemy_api_key_here"    # Optional
    ETHERSCAN_KEY="your_etherscan_api_key"     # Optional for contract verification
    ```
 4. Set up Pinata API key (for photo uploads):
@@ -172,11 +173,17 @@ git push origin your-branch-name
 - Selected carriers have a clear badge and selecting a carrier does not move the user away from the current form position
 
 **Agreement Creation**
-- Route-aware agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo CID
+- Route-aware agreement creation with origin, destination, item type, parcel size, weight, delivery speed, guarantee tier, and optional photo upload
 - Carrier speed validation: Validates that selected carrier offers the chosen delivery speed before agreement creation
 - Editable browser-calculated price suggestion and duplicate-milestone validation
 - Live ETH-to-MYR estimate beside the editable ETH amount (ETH remains the on-chain payment currency)
 - Milestone-based payment structure with configurable percentages
+
+**Notifications & Guidance**
+- Role-specific notifications for requests, acceptance, rejection, funding, deadline changes, milestone updates, refunds, disputes, evidence, and final decisions
+- Read/unread notification filters; selecting a message opens the related agreement
+- Plain-language reminders, confirmations, validation messages, and wallet errors
+- Important errors appear in the centre of the screen and remain visible long enough to read
 
 **Agreement Management**
 - Agreement participation tracking with wallet balance, live escrow balance, progress indicators, and deadline countdowns
