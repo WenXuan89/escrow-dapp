@@ -1,4 +1,4 @@
-// import { PINATA_JWT } from './config.js';
+const PINATA_JWT = window.PINATA_JWT || "";
 const ROLE = { NONE: 0, SHIPPER: 1, CARRIER: 2, ARBITRATOR: 3 };
 const ROLE_LABELS = ["Unregistered", "Shipper", "Carrier", "Arbitrator"];
 const STATUS = ["Created", "Accepted", "Rejected", "Funded", "In progress", "Completed", "Refunded", "Disputed"];
@@ -15,7 +15,6 @@ const CLOSED_STATUSES = [2, 5, 6, 7];
 const DATE_FILTER_TABS = ["all", "closed"];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
-const PINATA_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI2NjNlZDI5NC1lZjRiLTRiNDctOGQyNy1hNTlhZDQxNDAwMzMiLCJlbWFpbCI6Indlbnh1YW5uODlAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImZmMzQ5NmViYzMxZDdjMTMwNWZhIiwic2NvcGVkS2V5U2VjcmV0IjoiMWNkNGJlZmQ3NzcxYWNiMmJmOTRkODBmZjI0NWQ5YzE5MzdiZDE5NmZjNWYyZDIzMzY3YzYxODRkNjY3MTlkYyIsImV4cCI6MTgyMDMxNzU2OX0.1JYGzd4hSomaSwNTCY5X79aEzHOk-7ANmUDMPbxwQoQ';
 const REWARD_MIN = 1;
 const REWARD_MAX = 500;
 const CARRIER_PAGE_SIZE = 6;
@@ -67,6 +66,40 @@ const shortAddress = (address, head = 6, tail = 4) => address ? `${address.slice
 const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const formatDate = timestamp => timestamp ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "Not yet";
 const roleLabel = role => ROLE_LABELS[role] || "Unknown";
+
+async function copyToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (_) {
+    }
+  }
+
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = value;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.width = "1px";
+    ta.style.height = "1px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
 
 async function uploadToIPFS(file) {
     if (!file) {
@@ -585,7 +618,7 @@ function configureDashboardForRole() {
   $("#profileAvatar").textContent = state.account.slice(2, 4).toUpperCase();
   $("#profileAvatar").style.background = avatarColor(state.account).replace("86%", "34%");
   $("#dashboardEyebrow").textContent = `${roleLabel(state.role)} dashboard`;
-  $("#dashboardGreeting").textContent = isArbitrator ? "Dispute centre" : `Welcome back, ${roleLabel(state.role).toLowerCase()}`;
+  updateDashboardGreeting();
   $("#dashboardIntro").textContent = isArbitrator ? "Review disputes and decide who receives the remaining money." : "View your delivery agreements and next actions.";
   $("#notificationHeading").textContent = isArbitrator ? "Disputes waiting for a decision" : isShipper ? "Delivery updates" : "Requests and delivery updates";
   $("#agreementSectionTitle").textContent = isArbitrator ? "Dispute centre" : "Your agreements";
@@ -620,6 +653,19 @@ function configureDashboardForRole() {
   }
 }
 
+function updateDashboardGreeting() {
+  const node = $("#dashboardGreeting");
+  if (!node) return;
+  if (state.role === ROLE.ARBITRATOR) {
+    node.textContent = "Dispute centre";
+    return;
+  }
+  const name = String(state.displayName || "").trim();
+  node.textContent = name
+    ? `Welcome back, ${name}`
+    : `Welcome back, ${roleLabel(state.role).toLowerCase()}`;
+}
+
 async function refreshAll() {
   if (!state.contract && !state.demo) return;
   try {
@@ -649,7 +695,11 @@ async function refreshCarriers() {
     try { name = await state.contract.methods.displayName(address).call(); } catch (_) { /* optional label */ }
     try {
       const rawProfile = await state.contract.methods.getCarrierProfile(address).call();
-      profile = { location: Number(valueAt(rawProfile, "location", 0)), deliveryTypes: Number(valueAt(rawProfile, "deliveryTypes", 1)), isSet: Boolean(valueAt(rawProfile, "isSet", 2)) };
+      profile = {
+        locations: Number(valueAt(rawProfile, "locations", 0)),
+        deliveryTypes: Number(valueAt(rawProfile, "deliveryTypes", 1)),
+        isSet: Boolean(valueAt(rawProfile, "isSet", 2))
+      };
     } catch (_) { /* profile was added in the latest contract */ }
     try { if (state.token) reputation = await state.token.methods.balanceOf(address).call(); } catch (_) { /* optional reputation display */ }
     return { address, name: name || "Registered carrier", profile, reputation };
@@ -665,6 +715,7 @@ async function refreshProfile() {
     try { state.disputeReputation = await state.contract.methods.disputeReputationEarned(state.account).call(); } catch (_) { state.disputeReputation = "0"; }
   }
   $("#displayNameInput").value = state.displayName || "";
+  updateDashboardGreeting();
   const points = Number(state.reputation || 0);
   const stars = Math.min(5, Math.floor(points / 100));
   $("#reputationStars").textContent = `${"★".repeat(stars)}${"☆".repeat(5 - stars)}`;
@@ -674,7 +725,10 @@ async function refreshProfile() {
   if (state.role === ROLE.CARRIER) {
     try {
       const profile = await state.contract.methods.getCarrierProfile(state.account).call();
-      $("#profileLocation").value = String(Number(valueAt(profile, "location", 0)) || 1);
+      const locationMask = Number(valueAt(profile, "locations", 0));
+      $$('[name="primaryLocation"]').forEach(input => {
+        input.checked = Boolean(locationMask & Number(input.value));
+      });
       const mask = Number(valueAt(profile, "deliveryTypes", 1));
       $$('[name="deliveryType"]').forEach(input => { input.checked = Boolean(mask & Number(input.value)); });
     } catch (_) { /* keep defaults */ }
@@ -1102,6 +1156,16 @@ function deliveryLabels(mask) {
   return [[1, "Standard"], [2, "Express"], [4, "Same day"]].filter(([bit]) => Number(mask) & bit).map(([, label]) => label).join(", ") || "Profile not set";
 }
 
+function locationLabels(mask) {
+  const list = LOCATIONS.slice(1).filter((_, i) => Number(mask) & (1 << i));
+  return list.length ? list.join(", ") : "No locations set";
+}
+
+function locationBit(locationIndex) {
+  const n = Number(locationIndex);
+  return n >= 1 && n <= 16 ? (1 << (n - 1)) : 0;
+}
+
 function carrierCardSmall(carrier) {
   return `<button class="carrier-quick" type="button" data-select-carrier="${carrier.address}"><span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 9, 6)} · ${escapeHtml(reputationLabel(carrier.reputation))}</small></div></button>`;
 }
@@ -1109,19 +1173,19 @@ function carrierCardSmall(carrier) {
 function carrierCard(carrier, selectOnly = false) {
   const selectedAddress = $("#selectedCarrier")?.value || "";
   const isSelected = selectOnly && selectedAddress.toLowerCase() === carrier.address.toLowerCase();
-  return `<article class="carrier-card marketplace-card ${selectOnly ? "selectable" : ""} ${isSelected ? "selected" : ""}" ${selectOnly ? `data-select-carrier="${carrier.address}" tabindex="0"` : ""}>${selectOnly ? `<span class="selected-badge">Selected</span>` : ""}<span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 10, 6)}</small><p>${carrier.profile?.isSet ? escapeHtml(LOCATIONS[carrier.profile.location]) : "Location not set"} · ${escapeHtml(deliveryLabels(carrier.profile?.deliveryTypes))}</p><span class="rating">${escapeHtml(reputationLabel(carrier.reputation))}</span></div>${selectOnly ? `<button class="button button-secondary carrier-select-button" type="button" data-select-carrier="${carrier.address}">${isSelected ? "Selected" : "Select"}</button>` : `<button class="button button-primary" type="button" data-select-carrier="${carrier.address}">Create agreement</button>`}</article>`;
+  return `<article class="carrier-card marketplace-card ${selectOnly ? "selectable" : ""} ${isSelected ? "selected" : ""}" ${selectOnly ? `data-select-carrier="${carrier.address}" tabindex="0"` : ""}>${selectOnly ? `<span class="selected-badge">Selected</span>` : ""}<span class="identicon" style="--avatar-color:${avatarColor(carrier.address)}">${carrier.address.slice(2,4).toUpperCase()}</span><div><strong>${escapeHtml(carrier.name)}</strong><small>${shortAddress(carrier.address, 10, 6)}</small><p>${carrier.profile?.isSet ? escapeHtml(locationLabels(carrier.profile.locations)) : "Locations not set"} · ${escapeHtml(deliveryLabels(carrier.profile?.deliveryTypes))}</p><span class="rating">${escapeHtml(reputationLabel(carrier.reputation))}</span></div>${selectOnly ? `<button class="button button-secondary carrier-select-button" type="button" data-select-carrier="${carrier.address}">${isSelected ? "Selected" : "Select"}</button>` : `<button class="button button-primary" type="button" data-select-carrier="${carrier.address}">Create agreement</button>`}</article>`;
 }
 
 function matchingCarriersForForm() {
-    const destination = Number($("#destination")?.value || 0);
+    const origin = Number($("#origin")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const speedBit = speed <= 3 ? 2 ** (speed - 1) : 0;
+    const originBit = locationBit(origin);
     
     return state.carriers.filter(carrier => {
-       
         if (!carrier.profile?.isSet) return false;
-        
-        if (destination && carrier.profile.location !== destination) return false;
+
+        if (originBit && !(carrier.profile.locations & originBit)) return false;
         
         if (speedBit && !(carrier.profile.deliveryTypes & speedBit)) return false;
         
@@ -1131,7 +1195,7 @@ function matchingCarriersForForm() {
 
 function updateCarrierPicker(resetPage = false) {
     const picker = $("#carrierPicker");
-    const destination = Number($("#destination")?.value || 0);
+    const origin = Number($("#origin")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const query = ($("#carrierPickerSearch")?.value || "").trim().toLowerCase();
     const summary = $("#carrierPickerSummary");
@@ -1139,15 +1203,15 @@ function updateCarrierPicker(resetPage = false) {
     let matchingCarriers = matchingCarriersForForm().filter(carrier => !query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
     if (resetPage) state.carrierPickerPage = 1;
     
-    if (!destination) {
+    if (!origin) {
         picker.innerHTML = `
             <div class="empty-state">
-                <strong>Select a destination first</strong>
-                <p>Choose the delivery destination to see carriers serving that location.</p>
+                <strong>Select a pickup location first</strong>
+                <p>Choose the pickup location to see carriers serving that area.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = "Choose a destination and delivery type first.";
+        if (summary) summary.textContent = "Choose a pickup location and delivery type first.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1157,12 +1221,12 @@ function updateCarrierPicker(resetPage = false) {
         picker.innerHTML = `
             <div class="empty-state">
                 <strong>No carriers match</strong>
-                <p>No carriers serving ${LOCATIONS[destination]} offer ${speedLabel} delivery.</p>
-                <p style="font-size:12px;margin-top:8px;">Try changing the destination or delivery type.</p>
+                <p>No carriers pick up from ${LOCATIONS[origin]} offering ${speedLabel} delivery.</p>
+                <p style="font-size:12px;margin-top:8px;">Try changing the pickup location or delivery type.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = query ? "No carrier matches your search, destination and delivery type." : "No carrier matches this destination and delivery type.";
+        if (summary) summary.textContent = query ? "No carrier matches your search, pickup location and delivery type." : "No carrier matches this pickup location and delivery type.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1179,8 +1243,19 @@ function updateCarrierPicker(resetPage = false) {
       $("#carrierPickerPrev").disabled = state.carrierPickerPage === 1;
       $("#carrierPickerNext").disabled = state.carrierPickerPage === totalPages;
     }
+    
     if (matchingCarriers.length === 1) {
-        selectCarrier(matchingCarriers[0].address);
+      const only = matchingCarriers[0].address;
+      const input = $("#selectedCarrier");
+      if (input.value.toLowerCase() !== only.toLowerCase()) {
+        input.value = only;
+        $$('[data-select-carrier]').forEach(node => {
+            node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === only.toLowerCase());
+        });
+        $$(".carrier-select-button").forEach(button => {
+            button.textContent = button.dataset.selectCarrier.toLowerCase() === only.toLowerCase() ? "Selected" : "Select";
+        });
+      }
     }
 }
 
@@ -1235,24 +1310,34 @@ function updateDeliverySpeedOptions() {
 
 function selectCarrier(address) {
     const input = $("#selectedCarrier");
+    if (!input || !address) return;
+
     const alreadySelected = input.value.toLowerCase() === address.toLowerCase();
-    const createPageIsOpen = !$("#createSection").classList.contains("hidden");
+    if (alreadySelected) return; 
+
     input.value = address;
+    const lower = address.toLowerCase();
     $$('[data-select-carrier]').forEach(node => {
-        node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === address.toLowerCase());
+        node.classList.toggle("selected", node.dataset.selectCarrier.toLowerCase() === lower);
     });
     $$(".carrier-select-button").forEach(button => {
-      button.textContent = button.dataset.selectCarrier.toLowerCase() === address.toLowerCase() ? "Selected" : "Select";
+        button.textContent = button.dataset.selectCarrier.toLowerCase() === lower ? "Selected" : "Select";
     });
+
+    const createPageIsOpen = !$("#createSection").classList.contains("hidden");
     if (!createPageIsOpen) showSection("createSection");
-    if (alreadySelected) return;
-    const carrier = state.carriers.find(item => item.address.toLowerCase() === address.toLowerCase());
+
+    const carrier = state.carriers.find(item => item.address.toLowerCase() === lower);
     showToast(`${carrier?.name || "Carrier"} selected.`);
 }
 
 function renderMarketplace() {
   const query = ($("#carrierSearch")?.value || "").trim().toLowerCase(); const locationValue = Number($("#carrierLocationFilter")?.value || 0); const speed = Number($("#carrierSpeedFilter")?.value || 0);
-  let carriers = state.carriers.filter(carrier => (!query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)) && (!locationValue || carrier.profile?.location === locationValue) && (!speed || (carrier.profile?.deliveryTypes & speed)));
+  let carriers = state.carriers.filter(carrier => 
+  (!query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)) && 
+  (!locationValue || (carrier.profile?.locations & locationBit(locationValue))) && 
+  (!speed || (carrier.profile?.deliveryTypes & speed))
+);
   carriers.sort((a, b) => $("#carrierSort")?.value === "reputation" ? Number(b.reputation) - Number(a.reputation) : a.name.localeCompare(b.name));
   $("#carrierMarketplace").innerHTML = carriers.length ? carriers.map(carrier => carrierCard(carrier)).join("") : `<div class="empty-state"><strong>No matching carriers</strong>Change or clear the filters to see more carriers.</div>`;
 }
@@ -1368,13 +1453,14 @@ async function createAgreement(event) {
 
     const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
     if (carrierData && carrierData.profile?.isSet) {
-        const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
-        if (carrierData.profile.location !== destination) {
-            return showValidationError("The selected carrier does not serve this destination. Choose a carrier from the updated list.", "#carrierPickerSearch");
-        }
-        if (!(carrierData.profile.deliveryTypes & speedBit)) {
-            return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
-        }
+      const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
+      const originBit = locationBit(origin);
+      if (originBit && !(carrierData.profile.locations & originBit)) {
+        return showValidationError("The selected carrier does not pick up from this location. Choose a carrier from the updated list.", "#carrierPickerSearch");
+      }
+      if (!(carrierData.profile.deliveryTypes & speedBit)) {
+        return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
+      }
     }
     
     if (!ethValue || Number(ethValue) <= 0) return showValidationError("Enter the agreement value in ETH. It must be greater than zero.", "#totalValue");
@@ -1621,10 +1707,18 @@ function renderAgreementDetail(agreement) {
     </div>
     
     <div class="detail-body">
-      <div class="agreement-parties">
-        <div><span>Shipper MetaMask wallet</span><strong>${escapeHtml(agreement.shipper)}</strong><button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.shipper)}">Copy shipper address</button></div>
-        <div><span>Carrier MetaMask wallet</span><strong>${escapeHtml(agreement.carrier)}</strong><button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.carrier)}">Copy carrier address</button></div>
+    <div class="agreement-parties">
+      <div>
+        <span>Shipper MetaMask wallet</span>
+        <strong>${escapeHtml(agreement.shipper)}</strong>
+        <button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.shipper)}">Copy shipper address</button>
       </div>
+      <div>
+        <span>Carrier MetaMask wallet</span>
+        <strong>${escapeHtml(agreement.carrier)}</strong>
+        <button type="button" class="copy-inline" data-copy-address="${escapeHtml(agreement.carrier)}">Copy carrier address</button>
+      </div>
+    </div>
       <div class="detail-stats">
         <div class="detail-stat">
             <span>Agreement amount</span>
@@ -1998,10 +2092,10 @@ function seedDemo() {
   state.role = ROLE.SHIPPER;
   state.isArbitrator = false;
   state.carriers = [
-    { address: "0xA4413B7bd46e682feA6aF4339eD1fc6CC940Ab81", name: "Northstar Logistics", profile: { location: 12, deliveryTypes: 7, isSet: true }, reputation: "500" },
-    { address: "0x2C990F64c3eF79724D7Dc179f8EA7CcB402CB261", name: "Meridian Freight", profile: { location: 14, deliveryTypes: 3, isSet: true }, reputation: "300" },
-    { address: "0x6B86E1a3D577Fd859b7c554734dd45aE347A7C90", name: "GreenRoute Carrier", profile: { location: 7, deliveryTypes: 1, isSet: true }, reputation: "100" }
-  ];
+    { address: "0xA4413B7bd46e682feA6aF4339eD1fc6CC940Ab81", name: "Northstar Logistics", profile: { locations: (1<<11) | (1<<13), deliveryTypes: 7, isSet: true }, reputation: "500" },
+    { address: "0x2C990F64c3eF79724D7Dc179f8EA7CcB402CB261", name: "Meridian Freight",    profile: { locations: (1<<13),            deliveryTypes: 3, isSet: true }, reputation: "300" },
+    { address: "0x6B86E1a3D577Fd859b7c554734dd45aE347A7C90", name: "GreenRoute Carrier",  profile: { locations: (1<<6),             deliveryTypes: 1, isSet: true }, reputation: "100" }
+];
   state.agreements = [
     { id: 4, shipper: state.account, carrier: state.carriers[0].address, totalValue: 4.8, fundedAmount: 4.8, releasedAmount: 1.44, deadline: now + 172800, status: 4, details: { origin: 12, destination: 14, itemType: 2, size: 2, weight: 3500, deliverySpeed: 2, guaranteeTier: 2, photoCID: "bafycargo1042" }, milestones: [
       { index: 0, type: 1, description: "", percentage: 30, reported: true, completed: true, reportedTimestamp: now - 72000, completedTimestamp: now - 70000, proofCID: "bafybeipickup1042" },
@@ -2049,8 +2143,19 @@ function populateLocationSelects() {
   $("#destination").innerHTML = options;
   $("#origin").value = "12";
   $("#destination").value = "14";
-  $("#profileLocation").innerHTML = options;
   $("#carrierLocationFilter").insertAdjacentHTML("beforeend", options);
+}
+
+function populateProfileLocationGrid() {
+  const grid = $("#profileLocationGrid");
+  if (!grid) return;
+  grid.innerHTML = LOCATIONS.slice(1).map((label, i) => {
+    const bitValue = 1 << i;
+    return `<label class="check-label location-chip">
+      <input type="checkbox" name="primaryLocation" value="${bitValue}">
+      <span>${escapeHtml(label)}</span>
+    </label>`;
+  }).join("");
 }
 
 async function saveDisplayName(event) {
@@ -2062,11 +2167,12 @@ async function saveDisplayName(event) {
 
 async function saveCarrierProfile(event) {
   event.preventDefault();
-  const locationValue = Number($("#profileLocation").value);
+  const locationMask = $$('[name="primaryLocation"]:checked').reduce((sum, input) => sum + Number(input.value), 0);
   const mask = $$('[name="deliveryType"]:checked').reduce((sum, input) => sum + Number(input.value), 0);
-  if (!mask) return showToast("Select at least one delivery type.", "error");
+  if (!locationMask) return showValidationError("Select at least one primary location.", "#profileLocationGrid");
+  if (!mask) return showValidationError("Select at least one delivery type.", '[name="deliveryType"]');
   if (state.demo) return showToast("This action is unavailable in preview mode.", "error");
-  try { await sendTransaction(state.contract.methods.setCarrierProfile(locationValue, mask), {}, "Update carrier profile"); } catch (_) { /* surfaced */ }
+  try { await sendTransaction(state.contract.methods.setCarrierProfile(locationMask, mask), {}, "Update carrier profile"); } catch (_) { /* surfaced */ }
 }
 
 async function withdrawCommission() {
@@ -2123,26 +2229,31 @@ function bindEvents() {
   $("#agreementMonth").addEventListener("change", event => setAgreementMonthFilter(event.target.value));
   $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
   $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
-  ["origin", "destination", "parcelSize", "weight", "deliverySpeed", "guaranteeTier"].forEach(id => {
-    $("#" + id).addEventListener("input", () => {
-      updatePriceSuggestion(false);
-      renderCarriers();
-    });
-    $("#" + id).addEventListener("change", () => {
-      updatePriceSuggestion(false);
-      renderCarriers();
-    });
+  // Fields that affect the price suggestion and carrier marketplace
+["parcelSize", "weight", "guaranteeTier"].forEach(id => {
+  const el = $("#" + id);
+  if (!el) return;
+  el.addEventListener("input", () => {
+    updatePriceSuggestion(false);
+    renderCarriers();
   });
-  $("#destination").addEventListener("change", function() {
+  el.addEventListener("change", () => {
+    updatePriceSuggestion(false);
+    renderCarriers();
+  });
+});
+["origin", "destination", "deliverySpeed"].forEach(id => {
+  const el = $("#" + id);
+  if (!el) return;
+  el.addEventListener("change", () => {
+    updatePriceSuggestion(false);
     $("#selectedCarrier").value = "";
     $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+    $$(".carrier-select-button").forEach(button => { button.textContent = "Select"; });
+    renderMarketplace();
     updateCarrierPicker(true);
   });
-  $("#deliverySpeed").addEventListener("change", function() {
-    $("#selectedCarrier").value = "";
-    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
-    updateCarrierPicker(true);
-  });
+}); 
 
   $("#addMilestoneButton").addEventListener("click", () => addMilestoneRow());
   $("#milestoneRows").addEventListener("input", updatePercentageTotal);
@@ -2177,7 +2288,14 @@ function bindEvents() {
     const copyAddress = event.target.closest("[data-copy-address]");
     if (copyAddress) {
       event.preventDefault();
-      navigator.clipboard.writeText(copyAddress.dataset.copyAddress).then(() => showToast("Wallet address copied.")).catch(() => showToast("The address could not be copied. Select and copy it manually.", "error"));
+      const value = copyAddress.dataset.copyAddress;
+      copyToClipboard(value).then(ok => {
+        if (ok) {
+          showToast("Wallet address copied.");
+        } else {          
+          showToast("The address could not be copied. Select and copy it manually.", "error");
+        }
+      });
       return;
     }
     const nav = event.target.closest("[data-section-target]");
@@ -2233,6 +2351,7 @@ function bindEvents() {
 async function init() {
   bindEvents();
   populateLocationSelects();
+  populateProfileLocationGrid();   
   setDefaultDeadline();
   updatePriceSuggestion(true);
   loadCachedEthMyrRate();

@@ -113,7 +113,8 @@
         <span class="notice-icon">⚙</span>
         <span class="section-label">One-time setup</span>
         <h2 id="setupTitle">Connect to the escrow contract</h2>
-        <p id="setupMessage">Set up the smart contracts, then reload this page. If needed, enter the Escrow contract address below.</p>
+        <p id="setupMessage">Set up the smart contracts, then reload this page. If needed, enter the Escrow contract
+          address below.</p>
         <form id="addressForm" class="inline-form">
           <label class="sr-only" for="contractAddress">Escrow contract address</label>
           <input id="contractAddress" type="text" placeholder="0x… Escrow contract address" autocomplete="off">
@@ -130,10 +131,12 @@
         <p>Choose carefully. This wallet's role cannot be changed later.</p>
         <div class="role-grid">
           <button class="role-option" type="button" data-register-role="1">
-            <span class="role-icon">↗</span><strong>I'm a Shipper</strong><small>Create agreements, add payments and approve delivery updates</small>
+            <span class="role-icon">↗</span><strong>I'm a Shipper</strong><small>Create agreements, add payments and
+              approve delivery updates</small>
           </button>
           <button class="role-option" type="button" data-register-role="2">
-            <span class="role-icon">▣</span><strong>I'm a Carrier</strong><small>Accept work, report progress and receive payments</small>
+            <span class="role-icon">▣</span><strong>I'm a Carrier</strong><small>Accept work, report progress and
+              receive payments</small>
           </button>
         </div>
       </div>
@@ -152,8 +155,8 @@
           <button class="nav-item" type="button" data-section-target="agreementsSection"><span>▤</span>Agreements <b
               id="agreementNavCount">0</b></button>
           <button id="notificationsNavItem" class="nav-item participant-only" type="button"
-            data-section-target="notificationsSection"><span>◉</span>Notifications <b
-              id="notificationNavCount" class="hidden">0</b></button>
+            data-section-target="notificationsSection"><span>◉</span>Notifications <b id="notificationNavCount"
+              class="hidden">0</b></button>
           <button class="nav-item shipper-only" type="button"
             data-section-target="marketplaceSection"><span>⌕</span>Carrier marketplace</button>
           <button id="createNavItem" class="nav-item shipper-only" type="button"
@@ -195,11 +198,12 @@
             </div>
             <div class="admin-control-grid">
               <div class="earnings-card"><span>Available commission</span><strong id="arbitratorEarnings">0
-                  ETH</strong><small>5% service fee collected from approved milestones and dispute payments made to carriers</small><button id="withdrawCommissionButton" class="button button-primary"
+                  ETH</strong><small>5% service fee collected from approved milestones and dispute payments made to
+                  carriers</small><button id="withdrawCommissionButton" class="button button-primary"
                   type="button">Withdraw commission</button></div>
               <form id="rewardSettingsForm" class="reward-form">
-                <label>Completed-delivery reward<input id="completionRewardInput" type="number" min="1" max="500" step="1"
-                    required><small>Enter 1–500 reputation points for the carrier.</small></label>
+                <label>Completed-delivery reward<input id="completionRewardInput" type="number" min="1" max="500"
+                    step="1" required><small>Enter 1–500 reputation points for the carrier.</small></label>
                 <label>Carrier dispute-win reward<input id="disputeRewardInput" type="number" min="1" max="500" step="1"
                     required><small>Enter 1–500 points when a dispute decision favours the carrier.</small></label>
                 <button class="button button-secondary" type="submit">Save reward settings</button>
@@ -211,7 +215,8 @@
             <div class="panel span-two notification-panel">
               <div class="panel-heading">
                 <div><span class="section-label">Notifications</span>
-                  <h3><span id="notificationHeading">Delivery updates and next actions</span> <b id="notificationCount" class="notification-count hidden">0</b></h3>
+                  <h3><span id="notificationHeading">Delivery updates and next actions</span> <b id="notificationCount"
+                      class="notification-count hidden">0</b></h3>
                 </div>
               </div>
               <div id="notificationList" class="notification-list" aria-live="polite"></div>
@@ -256,10 +261,12 @@
               <h2>Notifications</h2>
               <p>Select a message to open its agreement. Read messages remain available.</p>
             </div>
-            <button id="markAllNotificationsRead" class="button button-secondary" type="button">Mark all as read</button>
+            <button id="markAllNotificationsRead" class="button button-secondary" type="button">Mark all as
+              read</button>
           </div>
           <div class="notification-toolbar" role="group" aria-label="Filter notifications">
-            <button class="filter-chip active" type="button" data-notification-filter="unread">Unread <b id="unreadNotificationCount">0</b></button>
+            <button class="filter-chip active" type="button" data-notification-filter="unread">Unread <b
+                id="unreadNotificationCount">0</b></button>
             <button class="filter-chip" type="button" data-notification-filter="read">Read</button>
             <button class="filter-chip" type="button" data-notification-filter="all">All</button>
           </div>
@@ -360,7 +367,8 @@
                   <option value="3">Premium</option>
                 </select></label>
               <div class="image-input-card full-field" data-image-input>
-                <div><strong>Parcel photos (optional)</strong><small>Select photos of the parcel. Open a preview to enlarge it, or use × to remove it.</small></div>
+                <div><strong>Parcel photos (optional)</strong><small>Select photos of the parcel. Open a preview to
+                    enlarge it, or use × to remove it.</small></div>
                 <label class="file-button">Choose photos<input id="parcelPhotoFile" type="file" accept="image/*"
                     multiple></label>
                 <span id="parcelPhotoCount" class="photo-count">No photos selected</span>
@@ -368,26 +376,34 @@
               </div>
               <div class="value-deadline-row full-field">
                 <label>Total agreement value
-                  <span class="money-input"><span aria-hidden="true">Ξ</span><input id="totalValue" name="totalValue" type="number" min="0.000001" step="0.000001" placeholder="0.015" required><b>ETH</b></span>
+                  <span class="money-input"><span aria-hidden="true">Ξ</span><input id="totalValue" name="totalValue"
+                      type="number" min="0.000001" step="0.000001" placeholder="0.015" required><b>ETH</b></span>
                   <strong id="myrEstimate" class="myr-estimate">Enter an ETH amount to see MYR</strong>
-                  <small id="priceSuggestion" class="field-help">A suggested amount appears after you enter the delivery details.</small>
-                  <small id="myrRateStatus" class="rate-status" aria-live="polite">Loading the live ETH/MYR rate…</small>
-                  <button id="refreshRateButton" class="text-button rate-refresh" type="button">Refresh MYR rate</button>
+                  <small id="priceSuggestion" class="field-help">A suggested amount appears after you enter the delivery
+                    details.</small>
+                  <small id="myrRateStatus" class="rate-status" aria-live="polite">Loading the live ETH/MYR
+                    rate…</small>
+                  <button id="refreshRateButton" class="text-button rate-refresh" type="button">Refresh MYR
+                    rate</button>
                 </label>
-                <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required><small class="field-help">Choose a future date and time.</small></label>
+                <label>Delivery deadline<input id="deadline" name="deadline" type="datetime-local" required><small
+                    class="field-help">Choose a future date and time.</small></label>
               </div>
             </div>
             <div class="form-panel">
               <div class="form-step"><b>2</b>
                 <div>
                   <h3>Select a carrier</h3>
-                  <p>Carriers must serve the destination and offer the selected delivery type. Six are shown per page.</p>
+                  <p>Carriers must serve the destination and offer the selected delivery type. Six are shown per page.
+                  </p>
                 </div>
               </div>
               <input id="selectedCarrier" name="carrier" type="hidden" required>
               <div id="carrierPickerTools" class="carrier-picker-tools">
-                <label>Find a carrier<input id="carrierPickerSearch" type="search" placeholder="Search by company name or wallet address"></label>
-                <small id="carrierPickerSummary" aria-live="polite">Choose a destination and delivery type first.</small>
+                <label>Find a carrier<input id="carrierPickerSearch" type="search"
+                    placeholder="Search by company name or wallet address"></label>
+                <small id="carrierPickerSummary" aria-live="polite">Choose a destination and delivery type
+                  first.</small>
               </div>
               <div id="carrierPicker" class="carrier-picker"></div>
               <div id="carrierPickerPagination" class="carrier-pagination hidden" aria-label="Carrier pages">
@@ -435,14 +451,20 @@
               <p>Carriers earn reputation points after completing a delivery or winning a dispute.</p>
             </article>
             <form id="carrierProfileForm" class="panel form-panel carrier-only">
-              <h3>Carrier service profile</h3><label>Primary location<select id="profileLocation"></select></label>
+              <h3>Carrier service profile</h3>
+              <fieldset class="profile-locations">
+                <legend>Primary locations</legend>
+                <div id="profileLocationGrid" class="location-grid"></div>
+                <small class="fieldset-help">Select one or more locations you pick up from.</small>
+              </fieldset>
               <fieldset>
-                <legend>Delivery types</legend><label class="check-label"><input name="deliveryType" type="checkbox"
-                    value="1">Standard</label><label class="check-label"><input name="deliveryType" type="checkbox"
-                    value="2">Express</label><label class="check-label"><input name="deliveryType" type="checkbox"
-                    value="4">Same day</label>
+                <legend>Delivery types</legend>
+                <label class="check-label"><input name="deliveryType" type="checkbox" value="1">Standard</label>
+                <label class="check-label"><input name="deliveryType" type="checkbox" value="2">Express</label>
+                <label class="check-label"><input name="deliveryType" type="checkbox" value="4">Same day</label>
                 <small class="fieldset-help">Select one or more delivery types.</small>
-              </fieldset><button class="button button-primary" type="submit">Save carrier profile</button>
+              </fieldset>
+              <button class="button button-primary" type="submit">Save carrier profile</button>
             </form>
             <article id="backendNotice" class="panel compatibility-card arbitrator-only"><span
                 class="section-label">Integration status</span>
@@ -506,6 +528,7 @@
   </template>
 
   <script src="/vendor/web3.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 
