@@ -5,5 +5,7 @@ ReputationToken: 0xc74e8af279910384757210b53F0394F678Fa81E5
 Escrow: 0x0A25e23f8fd5Eb711EDc022e7dDC1151D9A54A72
 
 # Etherscan Links:
-# Escrow: https://sepolia.etherscan.io/address/0xc9F3c31724D25a6195F08F6c39ffaf8a7Fe7184B
-# ReputationToken: https://sepolia.etherscan.io/address/0x2F682eEC5DCAf1d87dD8E9A4A68266a402468c9C
+# Escrow: https://sepolia.etherscan.io/address/0x230589F8fa4525EC05db8ff01b1dDbe19e3C2f4a
+# ReputationToken: https://sepolia.etherscan.io/address/0xb5744c99e801663f78a6a7D1A30BE3c979e0BB99
+
+

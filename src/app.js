@@ -1453,7 +1453,6 @@ async function createAgreement(event) {
 
     const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
     if (carrierData && carrierData.profile?.isSet) {
-    if (carrierData && carrierData.profile?.isSet) {
       const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
       const originBit = locationBit(origin);
       if (originBit && !(carrierData.profile.locations & originBit)) {
@@ -1462,7 +1461,6 @@ async function createAgreement(event) {
       if (!(carrierData.profile.deliveryTypes & speedBit)) {
         return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
       }
-    }
     }
     
     if (!ethValue || Number(ethValue) <= 0) return showValidationError("Enter the agreement value in ETH. It must be greater than zero.", "#totalValue");
@@ -2231,36 +2229,33 @@ function bindEvents() {
   $("#agreementMonth").addEventListener("change", event => setAgreementMonthFilter(event.target.value));
   $("#agreementDate").addEventListener("change", event => setAgreementDateFilter(event.target.value));
   $("#clearDateFilters").addEventListener("click", () => resetAgreementDateFilters(true));
-  // Fields that affect the price suggestion and carrier marketplace
-["parcelSize", "weight", "guaranteeTier"].forEach(id => {
-  const el = $("#" + id);
-  if (!el) return;
-  el.addEventListener("input", () => {
-    updatePriceSuggestion(false);
-    renderCarriers();
+  // Fields that affect the price suggestion and marketplace only
+  ["parcelSize", "weight", "guaranteeTier"].forEach(id => {
+    const el = $("#" + id);
+    if (!el) return;
+    el.addEventListener("input", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
+    el.addEventListener("change", () => {
+      updatePriceSuggestion(false);
+      renderCarriers();
+    });
   });
-  $("#origin").addEventListener("change", () => {
-    updatePriceSuggestion(false);
-    renderCarriers();
-    $("#selectedCarrier").value = "";
-    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
-    updateCarrierPicker(true);
-  });
-  });
-});
-["origin", "destination", "deliverySpeed"].forEach(id => {
-  const el = $("#" + id);
-  if (!el) return;
-  el.addEventListener("change", () => {
-    updatePriceSuggestion(false);
-    $("#selectedCarrier").value = "";
-    $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
-    $$(".carrier-select-button").forEach(button => { button.textContent = "Select"; });
-    renderMarketplace();
-    updateCarrierPicker(true);
-  });
-}); 
 
+  // Fields that also reset the carrier picker
+  ["origin", "destination", "deliverySpeed"].forEach(id => {
+    const el = $("#" + id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      updatePriceSuggestion(false);
+      $("#selectedCarrier").value = "";
+      $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
+      $$(".carrier-select-button").forEach(button => { button.textContent = "Select"; });
+      renderMarketplace();
+      updateCarrierPicker(true);
+    });
+  });
   $("#addMilestoneButton").addEventListener("click", () => addMilestoneRow());
   $("#milestoneRows").addEventListener("input", updatePercentageTotal);
   $("#milestoneRows").addEventListener("change", event => {
