@@ -1113,7 +1113,7 @@ function carrierCard(carrier, selectOnly = false) {
 }
 
 function matchingCarriersForForm() {
-    const destination = Number($("#destination")?.value || 0);
+    const origin = Number($("#origin")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const speedBit = speed <= 3 ? 2 ** (speed - 1) : 0;
     
@@ -1121,7 +1121,7 @@ function matchingCarriersForForm() {
        
         if (!carrier.profile?.isSet) return false;
         
-        if (destination && carrier.profile.location !== destination) return false;
+        if (origin && carrier.profile.location !== origin) return false;
         
         if (speedBit && !(carrier.profile.deliveryTypes & speedBit)) return false;
         
@@ -1131,7 +1131,7 @@ function matchingCarriersForForm() {
 
 function updateCarrierPicker(resetPage = false) {
     const picker = $("#carrierPicker");
-    const destination = Number($("#destination")?.value || 0);
+    const origin = Number($("#origin")?.value || 0);
     const speed = Number($("#deliverySpeed")?.value || 0);
     const query = ($("#carrierPickerSearch")?.value || "").trim().toLowerCase();
     const summary = $("#carrierPickerSummary");
@@ -1139,15 +1139,15 @@ function updateCarrierPicker(resetPage = false) {
     let matchingCarriers = matchingCarriersForForm().filter(carrier => !query || `${carrier.name} ${carrier.address}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
     if (resetPage) state.carrierPickerPage = 1;
     
-    if (!destination) {
+    if (!origin) {
         picker.innerHTML = `
             <div class="empty-state">
-                <strong>Select a destination first</strong>
-                <p>Choose the delivery destination to see carriers serving that location.</p>
+                <strong>Select an origin first</strong>
+                <p>Choose the pickup location to see carriers serving that area.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = "Choose a destination and delivery type first.";
+        if (summary) summary.textContent = "Choose an origin and delivery type first.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1157,12 +1157,12 @@ function updateCarrierPicker(resetPage = false) {
         picker.innerHTML = `
             <div class="empty-state">
                 <strong>No carriers match</strong>
-                <p>No carriers serving ${LOCATIONS[destination]} offer ${speedLabel} delivery.</p>
-                <p style="font-size:12px;margin-top:8px;">Try changing the destination or delivery type.</p>
+                <p>No carriers serving ${LOCATIONS[origin]} offer ${speedLabel} delivery.</p>
+                <p style="font-size:12px;margin-top:8px;">Try changing the origin or delivery type.</p>
             </div>
         `;
         $("#selectedCarrier").value = "";
-        if (summary) summary.textContent = query ? "No carrier matches your search, destination and delivery type." : "No carrier matches this destination and delivery type.";
+        if (summary) summary.textContent = query ? "No carrier matches your search, origin and delivery type." : "No carrier matches this origin and delivery type.";
         pagination?.classList.add("hidden");
         return;
     }
@@ -1364,13 +1364,13 @@ async function createAgreement(event) {
     if (origin === destination) return showValidationError("Pickup and delivery locations must be different.", "#destination");
     if (Number($("#weight").value) <= 0) return showValidationError("Enter a parcel weight greater than 0 kg.", "#weight");
     if (!selectedSpeed) return showValidationError("Choose a delivery speed.", "#deliverySpeed");
-    if (!carrier) return showValidationError("Choose a carrier that serves this destination and offers the selected delivery type.", "#carrierPickerSearch");
+    if (!carrier) return showValidationError("Choose a carrier that serves this pickup location and offers the selected delivery type.", "#carrierPickerSearch");
 
     const carrierData = state.carriers.find(c => c.address.toLowerCase() === carrier.toLowerCase());
     if (carrierData && carrierData.profile?.isSet) {
         const speedBit = selectedSpeed <= 3 ? 2 ** (selectedSpeed - 1) : 0;
-        if (carrierData.profile.location !== destination) {
-            return showValidationError("The selected carrier does not serve this destination. Choose a carrier from the updated list.", "#carrierPickerSearch");
+        if (carrierData.profile.location !== origin) {
+            return showValidationError("The selected carrier does not serve this pickup location. Choose a carrier from the updated list.", "#carrierPickerSearch");
         }
         if (!(carrierData.profile.deliveryTypes & speedBit)) {
             return showValidationError("The selected carrier does not offer this delivery type. Choose another carrier.", "#carrierPickerSearch");
@@ -2133,7 +2133,7 @@ function bindEvents() {
       renderCarriers();
     });
   });
-  $("#destination").addEventListener("change", function() {
+  $("#origin").addEventListener("change", function() {
     $("#selectedCarrier").value = "";
     $$('[data-select-carrier]').forEach(node => node.classList.remove("selected"));
     updateCarrierPicker(true);
